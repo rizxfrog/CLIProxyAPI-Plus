@@ -34,6 +34,7 @@ docs/*
 !docs/codebuddy-cn-tls-fingerprint.md
 !docs/deepseek-web.md
 !docs/monitoring.md
+!docs/adding-a-provider.md
 !docs/qoder-cn-client-analysis.md
 !docs/scripts/
 !docs/reverse-toolkit/
@@ -55,6 +56,13 @@ AGENTS.override.md
 .agents
 .pi
 .agents/*
+# Track only the shared Provider integration skill; keep other agent metadata local.
+!/.agents/
+!/.agents/skills/
+/.agents/skills/*
+!/.agents/skills/add-provider/
+/.agents/skills/add-provider/*
+!/.agents/skills/add-provider/SKILL.md
 .opencode/*
 .idea/*
 .beads/*
@@ -88,3 +96,4 @@ __pycache__/
 /.codemap/codemap.md
 /.codemap/config.json
 /.codemap/modules.json
+/DEV.md

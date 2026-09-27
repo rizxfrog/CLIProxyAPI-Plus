@@ -41,6 +41,11 @@ go build -o test-output ./cmd/server && rm test-output # Verify compile (REQUIRE
 - `sdk/cliproxy/` — Embeddable SDK entry (service/builder/watchers/pipeline)
 - `test/` — Cross-module integration tests
 
+## Adding an AI-client Provider
+- For requests to add a Provider/channel, reverse-proxy an AI client, or port a Provider from another project, read `.agents/skills/add-provider/SKILL.md` and `docs/adding-a-provider.md` before implementation.
+- Interpret this as a native upstream protocol integration (OAuth, refresh, execution/translation, models, quota and scheduling), not merely an OpenAI-compatible base URL or downstream client setup, unless the user explicitly asks for that narrower scope.
+- Analyze client artifacts/reference repositories supplied locally by the user. Do not independently search for, download, or clone implementation sources; ask for the missing local path.
+
 ## Code Conventions
 - Keep changes small and simple (KISS)
 - Comments in English only
