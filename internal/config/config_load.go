@@ -192,6 +192,9 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	// Sanitize Trae keys: drop entries without an access token.
 	cfg.SanitizeTraeKeys()
 
+	// Sanitize Cline keys: drop entries without an access token.
+	cfg.SanitizeClineKeys()
+
 	// Sanitize Qoder CN keys: drop entries without an access token.
 	cfg.SanitizeQoderCNKeys()
 

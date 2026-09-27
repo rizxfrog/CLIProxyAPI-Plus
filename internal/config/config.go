@@ -152,6 +152,9 @@ type Config struct {
 	// TraeKey defines TRAE SOLO CN desktop credentials.
 	TraeKey []TraeKey `yaml:"trae-api-key" json:"trae-api-key"`
 
+	// ClineKey defines Cline (cline.bot) OpenAI-compatible gateway credentials.
+	ClineKey []ClineKey `yaml:"cline-api-key" json:"cline-api-key"`
+
 	// QoderCNKey defines Qoder CN (qoder.cn / qoder.com.cn) credentials.
 	QoderCNKey []QoderCNKey `yaml:"qoder-cn-api-key" json:"qoder-cn-api-key"`
 

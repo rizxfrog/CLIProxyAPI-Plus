@@ -43,6 +43,11 @@ const codeArtsDefaultBaseURL = "https://snap-access.cn-north-4.myhuaweicloud.com
 
 const traeDefaultBaseURL = "https://trae-api-cn.mchost.guru"
 
+// clineDefaultBaseURL is the Cline (cline.bot) OpenAI-compatible gateway used
+// when a cline-api-key entry does not specify its own base-url. The executor
+// appends "/chat/completions".
+const clineDefaultBaseURL = "https://api.cline.bot/api/v1"
+
 // qoderCNDefaultBaseURL is the Qoder agent gateway origin used when a
 // qoder-cn-api-key entry does not specify its own base-url. Inference posts the
 // COSY-signed body to {gateway}/algo/api/v2/service/pro/sse/agent_chat_generation.
@@ -104,6 +109,8 @@ func (s *ConfigSynthesizer) Synthesize(ctx *SynthesisContext) ([]*coreauth.Auth,
 	out = append(out, s.synthesizeCodeArtsKeys(ctx)...)
 	// TRAE SOLO CN desktop credentials
 	out = append(out, s.synthesizeTraeKeys(ctx)...)
+	// Cline (cline.bot) OpenAI-compatible credentials
+	out = append(out, s.synthesizeClineKeys(ctx)...)
 	// Qoder CN (qoder.cn / qoder.com.cn) credentials
 	out = append(out, s.synthesizeQoderCNKeys(ctx)...)
 	out = append(out, s.synthesizeQoderAIKeys(ctx)...)
@@ -287,6 +294,18 @@ func (s *ConfigSynthesizer) synthesizeCodeBuddyAIKeys(ctx *SynthesisContext) []*
 		label:       "codebuddy-ai-apikey",
 		defaultBase: codeBuddyAIDefaultBaseURL,
 		hash:        diff.ComputeCodeBuddyAIModelsHash,
+	})
+}
+
+// synthesizeClineKeys creates Auth entries for Cline (cline.bot) credentials.
+func (s *ConfigSynthesizer) synthesizeClineKeys(ctx *SynthesisContext) []*coreauth.Auth {
+	return synthesizeCodeBuddyStyleKeys(ctx, ctx.Config.ClineKey, codeBuddyStyleKeySpec{
+		idKind:      "cline:apikey",
+		sourceName:  "cline",
+		provider:    constant.Cline,
+		label:       "cline-apikey",
+		defaultBase: clineDefaultBaseURL,
+		hash:        diff.ComputeClineModelsHash,
 	})
 }
 

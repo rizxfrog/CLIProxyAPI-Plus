@@ -30,6 +30,12 @@ type TraeKey = internalconfig.TraeKey
 // TraeModel is the TRAE SOLO CN model mapping type.
 type TraeModel = internalconfig.TraeModel
 
+// ClineKey is the Cline (cline.bot) credential type.
+type ClineKey = internalconfig.ClineKey
+
+// ClineModel is the Cline model mapping type.
+type ClineModel = internalconfig.ClineModel
+
 // CodexKey is the Codex credential type.
 type CodexKey = internalconfig.CodexKey
 

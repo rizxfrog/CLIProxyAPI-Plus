@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/auth/antigravity"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/auth/claude"
+	clineauth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/cline"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/auth/codebuddycn"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/auth/codex"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/auth/kimi"
@@ -1447,4 +1448,132 @@ func PopulateAuthContext(ctx context.Context, c *gin.Context) context.Context {
 		Headers: c.Request.Header,
 	}
 	return coreauth.WithRequestInfo(ctx, info)
+}
+
+// RequestClineToken starts the Cline (cline.bot) manual-paste login flow. Cline's
+// authorization-code callback carries the credential bundle as a base64 document
+// and forces a 127.0.0.1 callback_url, so remote CLIProxyAPI deployments cannot
+// receive the callback automatically. The Web UI shows the login URL and then
+// submits the full browser callback URL via PostClineAuthCallback.
+func (h *Handler) RequestClineToken(c *gin.Context) {
+	client := clineauth.NewClient(h.cfg)
+	loginURL, errBuild := client.BuildLoginURL()
+	if errBuild != nil {
+		log.Errorf("Failed to start Cline authorization: %v", errBuild)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start Cline authorization"})
+		return
+	}
+	state := strings.TrimSpace(loginURL.State)
+	if errState := ValidateOAuthState(state); errState != nil {
+		log.WithError(errState).Error("Cline returned invalid state")
+		c.JSON(http.StatusBadGateway, gin.H{"error": "invalid state"})
+		return
+	}
+	RegisterOAuthSession(state, "cline")
+	c.JSON(http.StatusOK, gin.H{
+		"status": "ok",
+		"url":    loginURL.URL,
+		"state":  state,
+		"flow":   "manual",
+	})
+}
+
+// PostClineAuthCallback receives the full Cline callback URL pasted by the user,
+// extracts the credential bundle, and persists the credential record.
+func (h *Handler) PostClineAuthCallback(c *gin.Context) {
+	var req struct {
+		State       string `json:"state"`
+		RedirectURL string `json:"redirect_url"`
+		Code        string `json:"code"`
+	}
+	if errBind := c.ShouldBindJSON(&req); errBind != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"status": "error", "error": "invalid body"})
+		return
+	}
+	state := strings.TrimSpace(req.State)
+	if state == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"status": "error", "error": "state is required"})
+		return
+	}
+	if errState := ValidateOAuthState(state); errState != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"status": "error", "error": "invalid state"})
+		return
+	}
+	if errGuard := guardOAuthSessionPendingForSave(state, "cline"); errGuard != nil {
+		c.JSON(http.StatusConflict, gin.H{"status": "error", "error": errGuard.Error()})
+		return
+	}
+	callback := strings.TrimSpace(req.RedirectURL)
+	if callback == "" {
+		callback = strings.TrimSpace(req.Code)
+	}
+	if callback == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"status": "error", "error": "redirect_url is required"})
+		return
+	}
+
+	ctx := PopulateAuthContext(context.Background(), c)
+	client := clineauth.NewClient(h.cfg)
+	token, errParse := client.ParseCallback(callback)
+	if errParse != nil {
+		log.Errorf("Cline callback parse failed: %v", errParse)
+		SetOAuthSessionError(state, oauthSessionErrorWithCause("Authentication failed", errParse))
+		c.JSON(http.StatusBadRequest, gin.H{"status": "error", "error": "failed to parse Cline callback URL"})
+		return
+	}
+
+	label := token.AccountLabel()
+	if label == "" {
+		label = "Cline"
+	}
+	fileName := fmt.Sprintf("cline-%s.json", clineIdentitySuffix(token))
+	metadata := map[string]any{
+		"type":          "cline",
+		"auth_kind":     "oauth",
+		"access_token":  token.AccessToken,
+		"refresh_token": token.RefreshToken,
+		"expires_at":    token.ExpiresAt,
+		"email":         token.Email,
+		"timestamp":     time.Now().UnixMilli(),
+	}
+	if strings.TrimSpace(token.RefreshToken) == "" {
+		delete(metadata, "refresh_token")
+	}
+	if token.ExpiresAt <= 0 {
+		delete(metadata, "expires_at")
+	}
+	record := &coreauth.Auth{
+		ID:       fileName,
+		Provider: "cline",
+		FileName: fileName,
+		Label:    label,
+		Metadata: metadata,
+		Attributes: map[string]string{
+			coreauth.AttributeAuthKind: coreauth.AuthKindOAuth,
+			"api_key":                  token.AccessToken,
+			"base_url":                 clineauth.BaseURL,
+		},
+	}
+	savedPath, errSave := h.saveTokenRecord(ctx, record)
+	if errSave != nil {
+		log.Errorf("Failed to save Cline token: %v", errSave)
+		SetOAuthSessionError(state, "Failed to save authentication tokens")
+		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "error": "failed to save authentication tokens"})
+		return
+	}
+	CompleteOAuthSession(state)
+	fmt.Printf("Cline authentication successful! Token saved to %s\n", savedPath)
+	c.JSON(http.StatusOK, gin.H{"status": "ok", "email": token.Email, "path": savedPath})
+}
+
+// clineIdentitySuffix derives a filesystem-safe credential file suffix.
+func clineIdentitySuffix(token *clineauth.TokenData) string {
+	if token == nil {
+		return fmt.Sprintf("%d", time.Now().UnixMilli())
+	}
+	identity := strings.TrimSpace(token.Email)
+	if identity == "" {
+		return fmt.Sprintf("%d", time.Now().UnixMilli())
+	}
+	return strings.NewReplacer("/", "_", "\\", "_", "@", "_at_", " ", "_").Replace(identity)
 }

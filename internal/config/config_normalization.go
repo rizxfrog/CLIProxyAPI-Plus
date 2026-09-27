@@ -287,6 +287,14 @@ func (cfg *Config) SanitizeCodeArtsKeys() {
 	cfg.CodeArtsKey = out
 }
 
+// SanitizeClineKeys normalizes Cline (cline.bot) credentials.
+func (cfg *Config) SanitizeClineKeys() {
+	if cfg == nil {
+		return
+	}
+	cfg.ClineKey = sanitizeCodeBuddyStyleKeyEntries(cfg.ClineKey)
+}
+
 // SanitizeTraeKeys normalizes TRAE SOLO CN desktop credentials.
 func (cfg *Config) SanitizeTraeKeys() {
 	if cfg == nil {

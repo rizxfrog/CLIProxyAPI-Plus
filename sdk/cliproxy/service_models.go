@@ -1097,6 +1097,13 @@ func buildCodeBuddyAIConfigModels(entry *config.CodeBuddyAIKey) []*ModelInfo {
 	return buildConfigModels(entry.Models, constant.CodeBuddyAI, "openai", constant.CodeBuddyAI)
 }
 
+func buildClineConfigModels(entry *config.ClineKey) []*ModelInfo {
+	if entry == nil {
+		return nil
+	}
+	return buildConfigModels(entry.Models, constant.Cline, "openai", constant.Cline)
+}
+
 func buildDeepSeekWebConfigModels(entry *config.DeepSeekWebKey) []*ModelInfo {
 	if entry == nil {
 		return nil
@@ -1197,6 +1204,15 @@ func (s *Service) resolveConfigCodeBuddyAIKey(auth *coreauth.Auth) *config.CodeB
 		return nil
 	}
 	return matchCodeBuddyCNConfigKey(auth, s.cfg.CodeBuddyAIKey)
+}
+
+// resolveConfigClineKey finds the configured Cline credential backing an auth
+// entry so per-credential model mappings and exclusions apply.
+func (s *Service) resolveConfigClineKey(auth *coreauth.Auth) *config.ClineKey {
+	if s == nil || s.cfg == nil {
+		return nil
+	}
+	return matchCodeBuddyCNConfigKey(auth, s.cfg.ClineKey)
 }
 
 func matchCodeBuddyCNConfigKey(auth *coreauth.Auth, entries []config.CodeBuddyCNKey) *config.CodeBuddyCNKey {

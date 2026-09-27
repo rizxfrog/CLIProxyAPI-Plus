@@ -33,6 +33,7 @@ var oauthProviders = []oauthProvider{
 	{"Xiaohuanxiong (Raccoon)", "xiaohuanxiong-auth-url", "🦝", false},
 	{"CodeArts (Huawei)", "codearts-auth-url", "🟥", false},
 	{"Meta", "meta-auth-url", "🔵", true},
+	{"Cline", "cline-auth-url", "🟢", false},
 }
 
 // oauthTabModel handles OAuth login flows.

@@ -269,6 +269,7 @@ func detectChangedProviders(oldData, newData *staticModelsJSON) []string {
 		{"qoder-cn", oldData.QoderCN, newData.QoderCN},
 		{"qoder-ai", oldData.QoderAI, newData.QoderAI},
 		{"meta", oldData.Meta, newData.Meta},
+		{"cline", oldData.Cline, newData.Cline},
 	}
 
 	seen := make(map[string]bool, len(sections))

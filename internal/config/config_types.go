@@ -889,6 +889,20 @@ type CodeBuddyAIKey = CodeBuddyCNKey
 // CodeBuddyAIModel uses the shared static/configured model mapping shape.
 type CodeBuddyAIModel = CodeBuddyCNModel
 
+// ClineKey represents a Cline (cline.bot) credential. The api-key field carries
+// the WorkOS OAuth access token produced by the browser authorization-code
+// login flow, or a manually pasted API key.
+//
+// Cline's OpenAI-compatible API (api.cline.bot) only implements streaming
+// (streamText); non-streaming requests return an empty body, so the executor
+// forces upstream streaming and folds the SSE back into JSON for stream:false
+// clients. The upstream bearer token is the bare WorkOS access token; Cline
+// rejects the legacy `workos:` prefix, so it is not applied.
+type ClineKey = CodeBuddyCNKey
+
+// ClineModel uses the shared static/configured model mapping shape.
+type ClineModel = CodeBuddyCNModel
+
 // QoderCNKey represents a Qoder CN (qoder.cn / qoder.com.cn) credential. The
 // api-key field carries the OAuth access token produced by the browser + PKCE
 // device flow (or a manually pasted bearer token).

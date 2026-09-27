@@ -38,6 +38,11 @@ func ComputeCodeBuddyCNModelsHash(models []config.CodeBuddyCNModel) string {
 	return modelconfig.ComputeCodeBuddyCNModelsHash(models)
 }
 
+// ComputeClineModelsHash returns a stable hash for Cline (cline.bot) model aliases.
+func ComputeClineModelsHash(models []config.ClineModel) string {
+	return modelconfig.ComputeClineModelsHash(models)
+}
+
 // ComputeCodeBuddyAIModelsHash returns a stable hash for CodeBuddy AI
 // (international) model aliases.
 func ComputeCodeBuddyAIModelsHash(models []config.CodeBuddyAIModel) string {

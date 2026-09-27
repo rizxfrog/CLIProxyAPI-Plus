@@ -777,6 +777,27 @@ nonstream-keepalive-interval: 0
 #   reuses the configured identity from an unclaimed trae-api-key entry and the
 #   stored auth file can claim rewards normally.
 
+# Cline (cline.bot) OpenAI-compatible gateway credentials.
+#
+# Obtain an access token with `--cline-login`, from the TUI OAuth tab, or from
+# the "Cline" entry in the Web UI OAuth page; the login opens app.cline.bot and
+# you paste the full 127.0.0.1 callback URL back. Pasting a token copied from a
+# logged-in Cline client (or a BYOK API key from app.cline.bot → Settings →
+# API Keys) also works.
+#
+# The upstream API at https://api.cline.bot/api/v1 only implements streaming,
+# so the executor always requests a stream and folds the SSE back into JSON for
+# non-streaming clients. Model IDs use Cline's provider-qualified form
+# (e.g. "anthropic/claude-opus-4.8").
+# cline-api-key:
+#   - api-key: "YOUR_CLINE_ACCESS_TOKEN"   # or "sk-..." BYOK key
+#     refresh-token: "YOUR_REFRESH_TOKEN"  # optional: enables rotation
+#     weight: 1
+#     prefix: "cline"                      # optional: require cline/...
+#     models:
+#       - name: "anthropic/claude-opus-4.8" # upstream model id
+#         alias: "claude-opus"
+
 # Qoder CN (qoder.cn / qoder.com.cn) API keys — the Qoder agent gateway's
 # COSY-signed /algo/api/v2/service/pro/sse/agent_chat_generation endpoint.
 #

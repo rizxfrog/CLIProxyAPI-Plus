@@ -37,6 +37,11 @@ const (
 	// Trae represents the TRAE SOLO CN desktop client provider identifier.
 	Trae = "trae"
 
+	// Cline represents the Cline (cline.bot) provider identifier. Cline's
+	// OpenAI-compatible API (api.cline.bot) is authenticated with a WorkOS OAuth
+	// token and only implements streaming chat completions.
+	Cline = "cline"
+
 	// Interactions represents the Google Interactions API format identifier.
 	Interactions = "interactions"
 

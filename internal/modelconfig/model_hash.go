@@ -72,6 +72,22 @@ func ComputeCodexModelsHash(models []config.CodexModel) string {
 }
 
 // ComputeCodeBuddyCNModelsHash returns a stable hash for CodeBuddy CN model aliases.
+// ComputeClineModelsHash returns a stable hash for Cline (cline.bot) model
+// aliases. It shares the CodeBuddy-style shape (name/alias/display-name/thinking).
+func ComputeClineModelsHash(models []config.ClineModel) string {
+	keys := modelRoutingKeys(func(out func(key string)) {
+		for _, model := range models {
+			name := strings.TrimSpace(model.Name)
+			alias := strings.TrimSpace(model.Alias)
+			if name == "" && alias == "" {
+				continue
+			}
+			out(strings.ToLower(name) + "|" + strings.ToLower(alias) + "|" + strings.TrimSpace(model.DisplayName) + "|" + fmt.Sprintf("force-mapping=%t", model.ForceMapping) + "|" + fmt.Sprintf("is-compat=%t", model.IsCompat) + thinkingHashSuffix(model.Thinking))
+		}
+	})
+	return hashJoined(keys)
+}
+
 func ComputeCodeBuddyCNModelsHash(models []config.CodeBuddyCNModel) string {
 	keys := modelRoutingKeys(func(out func(key string)) {
 		for _, model := range models {

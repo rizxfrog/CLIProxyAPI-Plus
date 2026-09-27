@@ -1912,6 +1912,16 @@ var codeBuddyAIKeyListSpec = codeBuddyKeyListSpec{
 	sanitize:     func(cfg *config.Config) { cfg.SanitizeCodeBuddyAIKeys() },
 }
 
+// clineKeyListSpec reuses the CodeBuddy-style CRUD shape because ClineKey is the
+// same api-key struct (Cline's gateway is OpenAI-compatible).
+var clineKeyListSpec = codeBuddyKeyListSpec{
+	yamlKey:      "cline-api-key",
+	authIndexKey: "cline:apikey",
+	get:          func(cfg *config.Config) []config.CodeBuddyCNKey { return cfg.ClineKey },
+	set:          func(cfg *config.Config, entries []config.CodeBuddyCNKey) { cfg.ClineKey = entries },
+	sanitize:     func(cfg *config.Config) { cfg.SanitizeClineKeys() },
+}
+
 // normalizeXiaohuanxiongKey trims and normalizes one Xiaohuanxiong credential.
 func normalizeXiaohuanxiongKey(entry *config.XiaohuanxiongKey) {
 	if entry == nil {
@@ -2193,6 +2203,23 @@ func (h *Handler) PatchCodeBuddyCNKey(c *gin.Context) {
 
 func (h *Handler) PatchCodeBuddyAIKey(c *gin.Context) {
 	h.patchCodeBuddyKey(c, codeBuddyAIKeyListSpec)
+}
+
+// cline-api-key: []ClineKey
+func (h *Handler) GetClineKeys(c *gin.Context) {
+	c.JSON(200, gin.H{clineKeyListSpec.yamlKey: h.codeBuddyKeysWithAuthIndex(clineKeyListSpec)})
+}
+
+func (h *Handler) PutClineKeys(c *gin.Context) {
+	h.putCodeBuddyKeys(c, clineKeyListSpec)
+}
+
+func (h *Handler) PatchClineKey(c *gin.Context) {
+	h.patchCodeBuddyKey(c, clineKeyListSpec)
+}
+
+func (h *Handler) DeleteClineKey(c *gin.Context) {
+	h.deleteCodeBuddyKey(c, clineKeyListSpec)
 }
 
 func (h *Handler) patchCodeBuddyKey(c *gin.Context, spec codeBuddyKeyListSpec) {

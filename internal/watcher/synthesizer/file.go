@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 
+	clineauth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/cline"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/auth/codex"
 	kimiauth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/kimi"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
@@ -225,6 +226,20 @@ func synthesizeFileAuths(ctx *SynthesisContext, fullPath string, data []byte) ([
 			}
 		}
 		a.Attributes["base_url"] = baseURL
+	}
+	if provider == constant.Cline {
+		a.Attributes[coreauth.AttributeAuthKind] = coreauth.AuthKindOAuth
+		baseURL, _ := metadata["base_url"].(string)
+		baseURL = strings.TrimSpace(baseURL)
+		if baseURL == "" {
+			baseURL = clineauth.BaseURL
+		}
+		a.Attributes["base_url"] = baseURL
+		if strings.TrimSpace(a.Attributes["api_key"]) == "" {
+			if token, _ := metadata["access_token"].(string); strings.TrimSpace(token) != "" {
+				a.Attributes["api_key"] = strings.TrimSpace(token)
+			}
+		}
 	}
 	if provider == constant.QoderCN || provider == constant.QoderAI {
 		a.Attributes[coreauth.AttributeAuthKind] = coreauth.AuthKindOAuth
