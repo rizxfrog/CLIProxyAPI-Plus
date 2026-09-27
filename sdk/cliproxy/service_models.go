@@ -1274,11 +1274,18 @@ func buildCodexConfigModels(entry *config.CodexKey) []*ModelInfo {
 		return nil
 	}
 	if len(entry.Models) == 0 {
-		return registry.GetCodexProModels()
+		models := registry.GetCodexProModels()
+		for _, model := range models {
+			if model != nil {
+				model.SupportConfigurationUpdate = false
+			}
+		}
+		return models
 	}
 
 	models := buildConfigModels(entry.Models, "openai", "openai", "codex")
 	configuredDisplayNames := make(map[string]string, len(entry.Models))
+	configuredConfigurationUpdates := make(map[string]bool, len(entry.Models))
 	seenConfiguredModels := make(map[string]struct{}, len(entry.Models))
 	for i := range entry.Models {
 		model := entry.Models[i]
@@ -1294,6 +1301,7 @@ func buildCodexConfigModels(entry *config.CodexKey) []*ModelInfo {
 			continue
 		}
 		seenConfiguredModels[key] = struct{}{}
+		configuredConfigurationUpdates[key] = model.SupportConfigurationUpdate
 
 		displayName := strings.TrimSpace(model.DisplayName)
 		if displayName != "" {
@@ -1304,9 +1312,11 @@ func buildCodexConfigModels(entry *config.CodexKey) []*ModelInfo {
 		if model == nil {
 			continue
 		}
-		if displayName, ok := configuredDisplayNames[strings.ToLower(model.ID)]; ok {
+		key := strings.ToLower(model.ID)
+		if displayName, ok := configuredDisplayNames[key]; ok {
 			model.DisplayName = displayName
 		}
+		model.SupportConfigurationUpdate = configuredConfigurationUpdates[key]
 	}
 	return models
 }

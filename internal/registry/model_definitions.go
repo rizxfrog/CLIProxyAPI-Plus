@@ -112,6 +112,7 @@ func GetAntigravityModels() []*ModelInfo {
 }
 
 var staticDevinModels = []*ModelInfo{
+	devinBuiltinSWE16SlowModelInfo(),
 	{
 		ID:                  "devin/swe-2",
 		Type:                "devin",
