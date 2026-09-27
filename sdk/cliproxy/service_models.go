@@ -9,6 +9,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/constant"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/modelconfig"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/config"
 )
@@ -71,11 +72,13 @@ func (s *Service) registerModelsForAuthWithCache(ctx context.Context, a *coreaut
 		return
 	}
 	var models []*ModelInfo
+	allowCustomModels := true
 	switch provider {
 	case constant.Gemini:
 		models = registry.GetGeminiModels()
 		if entry := s.resolveConfigGeminiKey(a); entry != nil {
 			if len(entry.Models) > 0 {
+				allowCustomModels = false
 				models = buildGeminiConfigModels(entry)
 			}
 			if authKind == "apikey" {
@@ -87,6 +90,7 @@ func (s *Service) registerModelsForAuthWithCache(ctx context.Context, a *coreaut
 		models = registry.GetGeminiModels()
 		if entry := s.resolveConfigInteractionsKey(a); entry != nil {
 			if len(entry.Models) > 0 {
+				allowCustomModels = false
 				models = buildGeminiConfigModels(entry)
 			}
 			if authKind == "apikey" {
@@ -99,6 +103,7 @@ func (s *Service) registerModelsForAuthWithCache(ctx context.Context, a *coreaut
 		models = registry.GetGeminiVertexModels()
 		if entry := s.resolveConfigVertexCompatKey(a); entry != nil {
 			if len(entry.Models) > 0 {
+				allowCustomModels = false
 				models = buildVertexCompatConfigModels(entry)
 			}
 			if authKind == "apikey" {
@@ -116,6 +121,7 @@ func (s *Service) registerModelsForAuthWithCache(ctx context.Context, a *coreaut
 		models = registry.GetClaudeModels()
 		if entry := s.resolveConfigClaudeKey(a); entry != nil {
 			if len(entry.Models) > 0 {
+				allowCustomModels = false
 				models = buildClaudeConfigModels(entry)
 			}
 			if authKind == "apikey" {
@@ -126,6 +132,7 @@ func (s *Service) registerModelsForAuthWithCache(ctx context.Context, a *coreaut
 	case "codex":
 		if authKind == "apikey" {
 			if entry := s.resolveConfigCodexKey(a); entry != nil {
+				allowCustomModels = len(entry.Models) == 0
 				models = buildCodexConfigModels(entry)
 				excluded = entry.ExcludedModels
 			}
@@ -159,6 +166,7 @@ func (s *Service) registerModelsForAuthWithCache(ctx context.Context, a *coreaut
 		models = registry.GetCodeBuddyCNModels()
 		if entry := s.resolveConfigCodeBuddyCNKey(a); entry != nil {
 			if len(entry.Models) > 0 {
+				allowCustomModels = false
 				models = buildCodeBuddyCNConfigModels(entry)
 			}
 			if authKind == "apikey" {
@@ -170,7 +178,20 @@ func (s *Service) registerModelsForAuthWithCache(ctx context.Context, a *coreaut
 		models = registry.GetCodeBuddyAIModels()
 		if entry := s.resolveConfigCodeBuddyAIKey(a); entry != nil {
 			if len(entry.Models) > 0 {
+				allowCustomModels = false
 				models = buildCodeBuddyAIConfigModels(entry)
+			}
+			if authKind == "apikey" {
+				excluded = entry.ExcludedModels
+			}
+		}
+		models = applyExcludedModels(models, excluded)
+	case constant.Cline:
+		models = registry.GetClineModels()
+		if entry := s.resolveConfigClineKey(a); entry != nil {
+			if len(entry.Models) > 0 {
+				allowCustomModels = false
+				models = buildClineConfigModels(entry)
 			}
 			if authKind == "apikey" {
 				excluded = entry.ExcludedModels
@@ -181,6 +202,7 @@ func (s *Service) registerModelsForAuthWithCache(ctx context.Context, a *coreaut
 		models = registry.GetDeepSeekWebModels()
 		if entry := s.resolveConfigDeepSeekWebKey(a); entry != nil {
 			if len(entry.Models) > 0 {
+				allowCustomModels = false
 				models = buildDeepSeekWebConfigModels(entry)
 			}
 			if authKind == "apikey" {
@@ -192,6 +214,7 @@ func (s *Service) registerModelsForAuthWithCache(ctx context.Context, a *coreaut
 		models = registry.GetCodeArtsModels()
 		if entry := s.resolveConfigCodeArtsKey(a); entry != nil {
 			if len(entry.Models) > 0 {
+				allowCustomModels = false
 				models = buildCodeArtsConfigModels(entry)
 			}
 			if authKind == "apikey" {
@@ -203,6 +226,7 @@ func (s *Service) registerModelsForAuthWithCache(ctx context.Context, a *coreaut
 		models = registry.GetXiaohuanxiongModels()
 		if entry := s.resolveConfigXiaohuanxiongKey(a); entry != nil {
 			if len(entry.Models) > 0 {
+				allowCustomModels = false
 				models = buildXiaohuanxiongConfigModels(entry)
 			}
 			if authKind == "apikey" {
@@ -214,6 +238,7 @@ func (s *Service) registerModelsForAuthWithCache(ctx context.Context, a *coreaut
 		models = registry.GetXAIModels()
 		if entry := s.resolveConfigXAIKey(a); entry != nil {
 			if len(entry.Models) > 0 {
+				allowCustomModels = false
 				models = buildXAIConfigModels(entry)
 			}
 			if authKind == "apikey" {
@@ -225,6 +250,7 @@ func (s *Service) registerModelsForAuthWithCache(ctx context.Context, a *coreaut
 		models = registry.GetTraeModels()
 		if entry := s.resolveConfigTraeKey(a); entry != nil {
 			if len(entry.Models) > 0 {
+				allowCustomModels = false
 				models = buildTraeConfigModels(entry)
 			}
 			if authKind == "apikey" {
@@ -236,6 +262,7 @@ func (s *Service) registerModelsForAuthWithCache(ctx context.Context, a *coreaut
 		models = registry.GetQoderCNModels()
 		if entry := s.resolveConfigQoderCNKey(a); entry != nil {
 			if len(entry.Models) > 0 {
+				allowCustomModels = false
 				models = buildQoderCNConfigModels(entry)
 			}
 			if authKind == "apikey" {
@@ -247,6 +274,7 @@ func (s *Service) registerModelsForAuthWithCache(ctx context.Context, a *coreaut
 		models = registry.GetQoderAIModels()
 		if entry := s.resolveConfigQoderAIKey(a); entry != nil {
 			if len(entry.Models) > 0 {
+				allowCustomModels = false
 				models = buildQoderAIConfigModels(entry)
 			}
 			if authKind == "apikey" {
@@ -261,6 +289,7 @@ func (s *Service) registerModelsForAuthWithCache(ctx context.Context, a *coreaut
 		models = registry.GetMetaModels()
 		if entry := s.resolveConfigMetaKey(a); entry != nil {
 			if len(entry.Models) > 0 {
+				allowCustomModels = false
 				models = buildMetaConfigModels(entry)
 			}
 			if authKind == "apikey" {
@@ -307,6 +336,9 @@ func (s *Service) registerModelsForAuthWithCache(ctx context.Context, a *coreaut
 					isCompatAuth = true
 				}
 			}
+			if isCompatAuth {
+				providerKey = util.OpenAICompatibleProviderKey(providerKey)
+			}
 			registerCompat := func(compat *config.OpenAICompatibility) bool {
 				if compat == nil || compat.Disabled {
 					return false
@@ -316,17 +348,9 @@ func (s *Service) registerModelsForAuthWithCache(ctx context.Context, a *coreaut
 				if providerKey == "" {
 					providerKey = "openai-compatibility"
 				}
-				if len(ms) > 0 {
-					ms = s.appendPluginModels(providerKey, ms)
-					s.registerResolvedModelsForAuth(a, providerKey, applyModelPrefixes(ms, a.Prefix, s.cfg.ForceModelPrefix))
-				} else {
-					ms = s.appendPluginModels(providerKey, nil)
-					if len(ms) > 0 {
-						s.registerResolvedModelsForAuth(a, providerKey, applyModelPrefixes(ms, a.Prefix, s.cfg.ForceModelPrefix))
-					} else {
-						GlobalModelRegistry().UnregisterClient(a.ID)
-					}
-				}
+				ms = s.appendPluginModels(providerKey, ms)
+				ms = s.applyProviderModelOverlay(providerKey, ms, len(compat.Models) == 0, excluded)
+				s.registerResolvedModelsForAuth(a, providerKey, applyModelPrefixes(ms, a.Prefix, s.cfg.ForceModelPrefix))
 				return true
 			}
 			if cached, ok := compatCache.lookup(a, compatName); ok {
@@ -337,18 +361,9 @@ func (s *Service) registerModelsForAuthWithCache(ctx context.Context, a *coreaut
 				if providerKey == "" {
 					providerKey = "openai-compatibility"
 				}
-				ms := cached.models
-				if len(ms) > 0 {
-					ms = s.appendPluginModels(providerKey, ms)
-					s.registerResolvedModelsForAuth(a, providerKey, applyModelPrefixes(ms, a.Prefix, s.cfg.ForceModelPrefix))
-				} else {
-					ms = s.appendPluginModels(providerKey, nil)
-					if len(ms) > 0 {
-						s.registerResolvedModelsForAuth(a, providerKey, applyModelPrefixes(ms, a.Prefix, s.cfg.ForceModelPrefix))
-					} else {
-						GlobalModelRegistry().UnregisterClient(a.ID)
-					}
-				}
+				ms := s.appendPluginModels(providerKey, cached.models)
+				ms = s.applyProviderModelOverlay(providerKey, ms, !cached.explicitModels, excluded)
+				s.registerResolvedModelsForAuth(a, providerKey, applyModelPrefixes(ms, a.Prefix, s.cfg.ForceModelPrefix))
 				return
 			}
 			if indexed := configEntryForAuthIndex(a, s.cfg.OpenAICompatibility); indexed != nil && registerCompat(indexed) {
@@ -363,7 +378,7 @@ func (s *Service) registerModelsForAuthWithCache(ctx context.Context, a *coreaut
 			if isCompatAuth {
 				models = s.appendPluginModels(providerKey, nil)
 				if len(models) > 0 {
-					s.registerResolvedModelsForAuth(a, providerKey, applyModelPrefixes(models, a.Prefix, s.cfg != nil && s.cfg.ForceModelPrefix))
+					s.registerResolvedModelsForAuth(a, providerKey, applyModelPrefixes(s.applyProviderModelOverlay(providerKey, models, false, excluded), a.Prefix, s.cfg != nil && s.cfg.ForceModelPrefix))
 				} else {
 					// No matching provider found or models removed entirely; drop any prior registration.
 					GlobalModelRegistry().UnregisterClient(a.ID)
@@ -375,6 +390,8 @@ func (s *Service) registerModelsForAuthWithCache(ctx context.Context, a *coreaut
 	if ctx.Err() != nil {
 		return
 	}
+	models = s.appendPluginModels(provider, models)
+	models = s.applyProviderModelOverlay(provider, models, allowCustomModels, excluded)
 	models = applyOAuthModelAliasForAuth(s.cfg, provider, authKind, a.Attributes, models)
 	if ctx.Err() != nil {
 		return
@@ -383,7 +400,6 @@ func (s *Service) registerModelsForAuthWithCache(ctx context.Context, a *coreaut
 	if key == "" {
 		key = strings.ToLower(strings.TrimSpace(a.Provider))
 	}
-	models = s.appendPluginModels(key, models)
 	if len(models) > 0 {
 		s.registerResolvedModelsForAuth(a, key, applyModelPrefixes(models, a.Prefix, s.cfg != nil && s.cfg.ForceModelPrefix))
 		if strings.EqualFold(strings.TrimSpace(a.Provider), "antigravity") {

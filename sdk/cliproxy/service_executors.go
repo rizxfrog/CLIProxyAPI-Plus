@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	internalconfig "github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/constant"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/pluginhost"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor"
@@ -24,8 +25,9 @@ var pluginHostHasAuthProvider = func(host *pluginhost.Host, provider string) boo
 }
 
 type openAICompatibilityRegistrationEntry struct {
-	providerKey string
-	models      []*ModelInfo
+	explicitModels bool
+	providerKey    string
+	models         []*ModelInfo
 }
 
 func (s *Service) newOpenAICompatibilityRegistrationCache() *openAICompatibilityRegistrationCache {
@@ -55,8 +57,9 @@ func (s *Service) newOpenAICompatibilityRegistrationCache() *openAICompatibility
 			providerName = "openai-compatibility"
 		}
 		entry := &openAICompatibilityRegistrationEntry{
-			providerKey: util.OpenAICompatibleProviderKey(providerName),
-			models:      buildOpenAICompatibilityConfigModels(compat),
+			providerKey:    util.OpenAICompatibleProviderKey(providerName),
+			models:         buildOpenAICompatibilityConfigModels(compat),
+			explicitModels: len(compat.Models) > 0,
 		}
 		cache.byIndex[i] = entry
 		if _, exists := cache.byName[key]; !exists {
@@ -460,6 +463,12 @@ func (s *Service) registerResolvedModelsForAuth(a *coreauth.Auth, providerKey st
 		GlobalModelRegistry().UnregisterClient(a.ID)
 		return
 	}
+	s.cfgMu.RLock()
+	cfg := s.cfg
+	s.cfgMu.RUnlock()
+	if cfg != nil && !cfg.Home.Enabled {
+		models = internalconfig.FilterProviderModels(models, cfg.ProviderModels[providerKey])
+	}
 	normalizedModels := make([]*ModelInfo, 0, len(models))
 	for _, model := range models {
 		if model == nil {
@@ -585,7 +594,7 @@ func (s *Service) tryRegisterPluginModelsForAuth(ctx context.Context, a *coreaut
 	if ctx != nil && ctx.Err() != nil {
 		return true
 	}
-	models := applyExcludedModels(result.Models, activeExcluded)
+	models := s.applyProviderModelOverlay(providerKey, result.Models, !s.hasExplicitProviderModels(activeAuth, providerKey), activeExcluded)
 	models = applyOAuthModelAliasForAuth(s.cfg, providerKey, activeAuthKind, activeAuth.Attributes, models)
 	if len(models) > 0 {
 		s.registerResolvedModelsForAuth(activeAuth, providerKey, applyModelPrefixes(models, activeAuth.Prefix, s.cfg != nil && s.cfg.ForceModelPrefix))

@@ -404,7 +404,7 @@ func (h *Host) commitModelClients(snap *Snapshot, modelRegistry modelRegistry, r
 	h.mu.Unlock()
 
 	for _, registration := range registrations {
-		modelRegistry.RegisterClient(registration.clientID, registration.provider, registration.models)
+		h.registerProviderModelClient(modelRegistry, registration)
 	}
 	for _, clientID := range staleClients {
 		modelRegistry.UnregisterClient(clientID)

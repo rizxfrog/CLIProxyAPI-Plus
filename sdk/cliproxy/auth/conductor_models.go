@@ -307,6 +307,9 @@ func (m *Manager) filterExecutionModels(auth *Auth, routeModel string, candidate
 	now := time.Now()
 	out := make([]string, 0, len(candidates))
 	for _, upstreamModel := range candidates {
+		if m.providerModelDisabled(auth, upstreamModel) {
+			continue
+		}
 		stateModel := m.stateModelForExecution(auth, routeModel, upstreamModel, pooled)
 		blocked, _, _ := isAuthBlockedForModel(auth, stateModel, now)
 		if blocked {

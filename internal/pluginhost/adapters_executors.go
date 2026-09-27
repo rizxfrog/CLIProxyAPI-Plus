@@ -185,7 +185,7 @@ func (h *Host) commitExecutorState(snap *Snapshot, manager executorManager, mode
 		return
 	}
 	for _, registration := range modelClientRegistrations {
-		modelRegistry.RegisterClient(registration.clientID, registration.provider, registration.models)
+		h.registerProviderModelClient(modelRegistry, registration)
 	}
 	for _, clientID := range staleModelClients {
 		modelRegistry.UnregisterClient(clientID)

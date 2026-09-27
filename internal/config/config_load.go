@@ -217,6 +217,10 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	cfg.SanitizeOpenAICompatibility()
 
 	// Normalize OAuth provider model exclusion map.
+	cfg.ProviderModels, err = NormalizeProviderModels(cfg.ProviderModels)
+	if err != nil {
+		return nil, err
+	}
 	cfg.OAuthExcludedModels = NormalizeOAuthExcludedModels(cfg.OAuthExcludedModels)
 
 	// Normalize global OAuth model name aliases.

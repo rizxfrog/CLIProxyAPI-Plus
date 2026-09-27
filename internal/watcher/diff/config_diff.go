@@ -447,6 +447,9 @@ func BuildConfigChangeDetails(oldCfg, newCfg *config.Config) []string {
 		}
 	}
 
+	if !reflect.DeepEqual(oldCfg.ProviderModels, newCfg.ProviderModels) {
+		changes = append(changes, "provider-models: updated")
+	}
 	if entries, _ := DiffOAuthExcludedModelChanges(oldCfg.OAuthExcludedModels, newCfg.OAuthExcludedModels); len(entries) > 0 {
 		changes = append(changes, entries...)
 	}

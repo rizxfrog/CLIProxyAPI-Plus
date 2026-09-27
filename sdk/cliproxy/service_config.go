@@ -199,6 +199,10 @@ func (s *Service) applyConfigRuntime(ctx context.Context, commit configCommit, s
 	if errContext := ctx.Err(); errContext != nil {
 		return false
 	}
+	// Re-register file-backed auths as well, including services without a plugin host.
+	if s.pluginHost == nil {
+		s.registerModelsForAuthBatch(registrationCtx, auths)
+	}
 	s.syncPluginModelRuntime(registrationCtx)
 	return ctx.Err() == nil
 }
