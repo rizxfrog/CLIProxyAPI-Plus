@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/credentialweight"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/credentialweight"
 )
 
 // TestXiaohuanxiongKeyAcceptsRefreshToken is a regression guard: the key type

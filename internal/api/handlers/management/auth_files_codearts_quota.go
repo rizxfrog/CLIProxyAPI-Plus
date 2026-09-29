@@ -8,9 +8,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	codeartsauth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/codearts"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
-	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
+	codeartsauth "github.com/router-for-me/CLIProxyAPI/v8/internal/auth/codearts"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
+	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 )
 
 // CodeArtsQuota is the account credit balance returned by the developer

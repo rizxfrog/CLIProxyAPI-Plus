@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	codeartsauth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/codearts"
-	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
+	codeartsauth "github.com/router-for-me/CLIProxyAPI/v8/internal/auth/codearts"
+	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 )
 
 // TestNewCodeArtsHTTPClientSignsRequest drives a request through the client and

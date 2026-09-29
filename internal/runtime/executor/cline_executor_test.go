@@ -6,9 +6,9 @@ import (
 
 	"github.com/tidwall/gjson"
 
-	clineauth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/cline"
-	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
-	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
+	clineauth "github.com/router-for-me/CLIProxyAPI/v8/internal/auth/cline"
+	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
+	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
 )
 
 func TestPrepareClineAuthSendsBareToken(t *testing.T) {

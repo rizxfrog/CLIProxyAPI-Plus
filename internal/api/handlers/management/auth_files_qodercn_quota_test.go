@@ -13,9 +13,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	qodercnauth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/qodercn"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/constant"
-	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
+	qodercnauth "github.com/router-for-me/CLIProxyAPI/v8/internal/auth/qodercn"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/constant"
+	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 )
 
 // registerQoderCNAuth builds a manager carrying one Qoder CN credential.

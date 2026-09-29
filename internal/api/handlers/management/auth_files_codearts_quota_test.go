@@ -10,9 +10,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	codeartsauth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/codearts"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
-	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
+	codeartsauth "github.com/router-for-me/CLIProxyAPI/v8/internal/auth/codearts"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
+	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 )
 
 // fakeCodeArtsBalance is a deterministic stand-in for the balance client.

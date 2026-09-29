@@ -13,7 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	dto "github.com/prometheus/client_model/go"
-	"github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/usage"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/usage"
 )
 
 func metric(t *testing.T, m *Metrics, name string, labels map[string]string) *dto.Metric {

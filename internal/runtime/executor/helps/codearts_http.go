@@ -10,9 +10,9 @@ import (
 
 	"github.com/tidwall/gjson"
 
-	codeartsauth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/codearts"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
-	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
+	codeartsauth "github.com/router-for-me/CLIProxyAPI/v8/internal/auth/codearts"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
+	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 )
 
 // CodeArtsSessionHeader carries the synthetic chat-session id upstream.

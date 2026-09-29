@@ -39,6 +39,7 @@ docs/*
 !docs/scripts/
 !docs/reverse-toolkit/
 !docs/reverse-note/
+!docs/management-api-v8.md
 AGENTS.md
 CLAUDE.md
 GEMINI.md
