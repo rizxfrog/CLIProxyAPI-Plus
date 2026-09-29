@@ -94,13 +94,37 @@ CLIProxyAPI already ships a `minimax/` prefixed model list (M1/M2/M2.1/M2.5/M2.7
 M2-her/M3/M2.1/01) of type `cline` (OpenAI-compat). The managed account uses the
 `MiniMax-M3`/`MiniMax-M2.7*` IDs and the Anthropic-Messages format.
 
-## Quota — UNKNOWN at this stage
-- No quota endpoint is referenced in the managed-login path. The client tracks
-  usage through response headers/websocket quota events in other providers; for
-  MiniMax managed there is no public probe in the supplied source.
-- Plan: expose unknown/limited and report observed response metadata only if the
-  upstream emits usage in the Anthropic response `usage` block. Do NOT fabricate
-  limits.
+## Quota — SOURCE-CONFIRMED (coding-plan probe)
+The native client does expose an authenticated quota source
+(`packages/tui/src/account/matrix-account-client.ts`):
+
+- Quota probe: `GET {openPlatformOrigin}/v1/api/openplatform/coding_plan/remains`
+  with `Authorization: Bearer <access_token>` and `X-Group-Id: <op_group_id>`.
+- Open-platform origins (prod): `en` -> `https://platform.minimax.io`,
+  `cn` -> `https://www.minimaxi.com` (distinct from the account and inference hosts).
+- Response: `base_resp.status_code` plus `model_remains[]`; the first entry is the
+  primary model. Each model carries a 5-hour window
+  (`current_interval_remaining_percent`, `end_time`, `current_interval_status`)
+  and a weekly window (`current_weekly_remaining_percent`, `weekly_end_time`,
+  `current_weekly_status`). `status == 3` means unlimited; otherwise the remaining
+  percentage is used, or derived from `usage_count / total_count`.
+- The `op_group_id` comes from the personal workspace returned by the signed
+  `POST /matrix/api/v1/user/get_user_extra_info`, with
+  `POST /matrix/api/v1/commerce/get_membership_info` as the scoped/plain fallback;
+  membership also carries `token_plan_tier`, `token_plan_expires_at` and
+  `op_credit_summary.total_remaining_amount`.
+- Signed matrix reads carry the same `yy` / `x-timestamp` / `x-signature`
+  attribution headers as the check-in flow (shared wire constants, not credentials).
+
+Management surface (implemented):
+- `GET /v0/management/minimax-quota?auth_index=...` resolves the credential by
+  auth index, refreshes a stale token once, and returns `plan`, `has_token_plan`,
+  `not_subscribed`, `expires_at_ms`, `credit_balance` and `windows[]`
+  (`kind` = `five_hour` | `weekly`, `remaining_percent`, `reset_at_ms`, `unlimited`).
+- `not_subscribed` is a real observation (no active coding plan), distinct from a
+  probe failure; an unknown/again-limited plan never fabricates a percentage.
+- Management reset still clears local routing/cooldown state only; it does not
+  refill the upstream coding plan.
 
 ## Streaming / tools / thinking
 - Anthropic Messages SSE streaming is reused from the Claude translator path.

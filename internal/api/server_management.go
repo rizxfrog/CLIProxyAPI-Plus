@@ -249,6 +249,7 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.GET("/codearts-quota", s.mgmt.GetCodeArtsQuota)
 		mgmt.GET("/qoder-cn-quota", s.mgmt.GetQoderCNQuota)
 		mgmt.GET("/qoder-ai-quota", s.mgmt.GetQoderCNQuota)
+		mgmt.GET("/minimax-quota", s.mgmt.GetMinimaxQuota)
 		mgmt.GET("/meta-auth-url", s.mgmt.RequestMetaToken)
 		mgmt.GET("/get-auth-status", s.mgmt.GetAuthStatus)
 		mgmt.DELETE("/oauth-session", s.mgmt.CancelAuthSession)

@@ -88,6 +88,16 @@ func (r Region) InferenceBaseURL() string {
 	return "https://agent.minimax.io/mavis/api/v1/llm"
 }
 
+// OpenPlatformOrigin returns the open-platform origin used by the coding-plan
+// quota probe (/v1/api/openplatform/coding_plan/remains). It is a different host
+// from both the account service and the inference gateway.
+func (r Region) OpenPlatformOrigin() string {
+	if r == RegionCN {
+		return "https://www.minimaxi.com"
+	}
+	return "https://platform.minimax.io"
+}
+
 // DeviceAuthorization is the device-code grant start response.
 type DeviceAuthorization struct {
 	DeviceCode      string
@@ -157,6 +167,23 @@ type Client struct {
 	region     Region
 	// sleep is injectable so tests can avoid real polling delays.
 	sleep func(context.Context, time.Duration) error
+	// matrixOriginOverride and openPlatformOriginOverride let tests point the
+	// quota reads at a stub origin. Production leaves them empty so the
+	// regional defaults are used.
+	matrixOriginOverride       string
+	openPlatformOriginOverride string
+}
+
+// WithOrigins returns a shallow copy of the client whose quota reads target the
+// supplied matrix and open-platform origins. It is used by tests.
+func (c *Client) WithOrigins(matrixOrigin, openPlatformOrigin string) *Client {
+	if c == nil {
+		return c
+	}
+	clone := *c
+	clone.matrixOriginOverride = strings.TrimSpace(matrixOrigin)
+	clone.openPlatformOriginOverride = strings.TrimSpace(openPlatformOrigin)
+	return &clone
 }
 
 // NewClient builds a proxy-aware client for the given region.
