@@ -12,6 +12,7 @@ import (
 	clineauth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/cline"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/auth/codex"
 	kimiauth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/kimi"
+	minimaxauth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/minimax"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/constant"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
@@ -226,6 +227,23 @@ func synthesizeFileAuths(ctx *SynthesisContext, fullPath string, data []byte) ([
 			}
 		}
 		a.Attributes["base_url"] = baseURL
+	}
+	if provider == constant.Minimax || provider == constant.MinimaxCN {
+		a.Attributes[coreauth.AttributeAuthKind] = coreauth.AuthKindOAuth
+		region := minimaxauth.RegionEN
+		if provider == constant.MinimaxCN {
+			region = minimaxauth.RegionCN
+		}
+		if raw, ok := metadata["region"].(string); ok && strings.TrimSpace(raw) != "" {
+			region = minimaxauth.NormalizeRegion(raw)
+		}
+		baseURL, _ := metadata["base_url"].(string)
+		baseURL = strings.TrimSpace(baseURL)
+		if baseURL == "" {
+			baseURL = region.InferenceBaseURL()
+		}
+		a.Attributes["base_url"] = baseURL
+		a.Attributes["minimax_region"] = string(region)
 	}
 	if provider == constant.Cline {
 		a.Attributes[coreauth.AttributeAuthKind] = coreauth.AuthKindOAuth

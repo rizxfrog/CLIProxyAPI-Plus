@@ -378,6 +378,10 @@ func NormalizeOAuthProvider(provider string) (string, error) {
 		return "codearts", nil
 	case "meta", "muse":
 		return "meta", nil
+	case "minimax", "minimax.ai", "minimax-code", "mcode":
+		return "minimax", nil
+	case "minimax-cn", "minimaxi", "minimax.cn":
+		return "minimax-cn", nil
 	default:
 		return "", errUnsupportedOAuthFlow
 	}

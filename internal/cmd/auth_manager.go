@@ -20,6 +20,8 @@ func newAuthManager() *sdkAuth.Manager {
 		sdkAuth.NewKimiAuthenticator(),
 		sdkAuth.NewCodeBuddyCNAuthenticator(),
 		sdkAuth.NewCodeBuddyAIAuthenticator(),
+		sdkAuth.NewMinimaxAuthenticator(),
+		sdkAuth.NewMinimaxCNAuthenticator(),
 		sdkAuth.NewQoderCNAuthenticator(),
 		sdkAuth.NewQoderAIAuthenticator(),
 		sdkAuth.NewKimiAIAuthenticator(),

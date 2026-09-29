@@ -192,3 +192,33 @@ func openAICompatKimiAuth() *coreauth.Auth {
 		},
 	}
 }
+
+func TestRegisterExecutorForAuthBindsMinimax(t *testing.T) {
+	cases := []struct {
+		provider string
+		wantType string
+	}{
+		{"minimax", "minimax"},
+		{"minimax-cn", "minimax-cn"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.provider, func(t *testing.T) {
+			manager := coreauth.NewManager(nil, nil, nil)
+			service := &Service{cfg: &config.Config{}, coreManager: manager}
+			auth := &coreauth.Auth{ID: tc.provider + "-auth", Provider: tc.provider}
+
+			service.registerExecutorForAuth(auth, false)
+
+			exec, ok := manager.Executor(tc.wantType)
+			if !ok || exec == nil {
+				t.Fatalf("executor %q not registered", tc.wantType)
+			}
+			if _, isMinimax := exec.(*runtimeexecutor.MinimaxExecutor); !isMinimax {
+				t.Fatalf("executor %q type = %T, want *executor.MinimaxExecutor", tc.wantType, exec)
+			}
+			if got := exec.Identifier(); got != tc.wantType {
+				t.Fatalf("executor identifier = %q, want %q", got, tc.wantType)
+			}
+		})
+	}
+}

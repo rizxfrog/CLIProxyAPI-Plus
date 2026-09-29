@@ -13,7 +13,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 )
 
-var nativeModelProviders = []string{"aistudio", "antigravity", "claude", "cline", "codearts", "codebuddy-ai", "codebuddy-cn", "codex", "deepseek-web", "devin", "gemini", "gemini-interactions", "kimi", "meta", "qoder-ai", "qoder-cn", "qwen-web", "trae", "vertex", "xai", "xiaohuanxiong"}
+var nativeModelProviders = []string{"aistudio", "antigravity", "claude", "cline", "codearts", "codebuddy-ai", "codebuddy-cn", "codex", "deepseek-web", "devin", "gemini", "gemini-interactions", "kimi", "meta", "minimax", "minimax-cn", "qoder-ai", "qoder-cn", "qwen-web", "trae", "vertex", "xai", "xiaohuanxiong"}
 
 type managedProviderModel struct {
 	ID                     string              `json:"id"`

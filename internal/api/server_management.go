@@ -229,6 +229,8 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.GET("/kimi-auth-url", s.mgmt.RequestKimiToken)
 		mgmt.GET("/codebuddy-cn-auth-url", s.mgmt.RequestCodeBuddyCNToken)
 		mgmt.GET("/codebuddy-ai-auth-url", s.mgmt.RequestCodeBuddyAIToken)
+		mgmt.GET("/minimax-auth-url", s.mgmt.RequestMinimaxToken)
+		mgmt.GET("/minimax-cn-auth-url", s.mgmt.RequestMinimaxCNToken)
 		mgmt.GET("/qoder-cn-auth-url", s.mgmt.RequestQoderCNToken)
 		mgmt.GET("/qoder-ai-auth-url", s.mgmt.RequestQoderAIToken)
 		mgmt.GET("/kimi-ai-auth-url", s.mgmt.RequestKimiAIToken)

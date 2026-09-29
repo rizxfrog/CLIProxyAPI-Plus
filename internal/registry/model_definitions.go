@@ -44,6 +44,7 @@ type staticModelsJSON struct {
 	QoderCN     []*ModelInfo `json:"qoder-cn"`
 	QoderAI     []*ModelInfo `json:"qoder-ai"`
 	Meta        []*ModelInfo `json:"meta"`
+	Minimax     []*ModelInfo `json:"minimax"`
 }
 
 // GetClaudeModels returns the standard Claude model definitions.
@@ -89,6 +90,11 @@ func GetCodexProModels() []*ModelInfo {
 // GetKimiModels returns the standard Kimi (Moonshot AI) model definitions.
 func GetKimiModels() []*ModelInfo {
 	return cloneModelInfos(getModels().Kimi)
+}
+
+// GetMinimaxModels returns the standard MiniMax Code managed-account model definitions.
+func GetMinimaxModels() []*ModelInfo {
+	return cloneModelInfos(getModels().Minimax)
 }
 
 // GetCodeBuddyCNModels returns the standard CodeBuddy CN (Tencent) model definitions.
@@ -1119,6 +1125,8 @@ func GetStaticModelDefinitionsByChannel(channel string) []*ModelInfo {
 		return GetCodeBuddyCNModels()
 	case "codebuddy-ai":
 		return GetCodeBuddyAIModels()
+	case constant.Minimax, constant.MinimaxCN:
+		return GetMinimaxModels()
 	case "deepseek-web":
 		return GetDeepSeekWebModels()
 	case constant.Xiaohuanxiong:
@@ -1185,6 +1193,7 @@ func LookupStaticModelInfo(modelID string) *ModelInfo {
 		GetXiaohuanxiongModels(),
 		GetCodeArtsModels(),
 		data.Meta,
+		data.Minimax,
 	}
 	for _, models := range allModels {
 		for _, m := range models {

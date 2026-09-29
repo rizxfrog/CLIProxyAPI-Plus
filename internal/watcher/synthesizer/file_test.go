@@ -1051,3 +1051,65 @@ func TestFileSynthesizer_Synthesize_NoteParsing(t *testing.T) {
 		})
 	}
 }
+
+func TestFileSynthesizer_Synthesize_MinimaxOAuth(t *testing.T) {
+	tempDir := t.TempDir()
+	raw := []byte(`{"type":"minimax","access_token":"access","refresh_token":"refresh","auth_kind":"oauth","region":"en"}`)
+	if err := os.WriteFile(filepath.Join(tempDir, "minimax.json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	auths, err := NewFileSynthesizer().Synthesize(&SynthesisContext{
+		Config:  &config.Config{},
+		AuthDir: tempDir,
+		Now:     time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("Synthesize() error = %v", err)
+	}
+	if len(auths) != 1 {
+		t.Fatalf("auth count = %d", len(auths))
+	}
+	if got := auths[0].AuthKind(); got != coreauth.AuthKindOAuth {
+		t.Fatalf("auth kind = %q", got)
+	}
+	if got := auths[0].Attributes["base_url"]; got != "https://agent.minimax.io/mavis/api/v1/llm" {
+		t.Fatalf("base_url = %q", got)
+	}
+	if got := auths[0].Attributes["minimax_region"]; got != "en" {
+		t.Fatalf("minimax_region = %q", got)
+	}
+	if auths[0].Provider != "minimax" {
+		t.Fatalf("provider = %q", auths[0].Provider)
+	}
+}
+
+func TestFileSynthesizer_Synthesize_MinimaxCNOAuth(t *testing.T) {
+	tempDir := t.TempDir()
+	raw := []byte(`{"type":"minimax-cn","access_token":"access","refresh_token":"refresh","auth_kind":"oauth"}`)
+	if err := os.WriteFile(filepath.Join(tempDir, "minimax-cn.json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	auths, err := NewFileSynthesizer().Synthesize(&SynthesisContext{
+		Config:  &config.Config{},
+		AuthDir: tempDir,
+		Now:     time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("Synthesize() error = %v", err)
+	}
+	if len(auths) != 1 {
+		t.Fatalf("auth count = %d", len(auths))
+	}
+	if got := auths[0].AuthKind(); got != coreauth.AuthKindOAuth {
+		t.Fatalf("auth kind = %q", got)
+	}
+	if got := auths[0].Attributes["base_url"]; got != "https://agent.minimax.cn/mavis/api/v1/llm" {
+		t.Fatalf("base_url = %q", got)
+	}
+	if got := auths[0].Attributes["minimax_region"]; got != "cn" {
+		t.Fatalf("minimax_region = %q", got)
+	}
+	if auths[0].Provider != "minimax-cn" {
+		t.Fatalf("provider = %q", auths[0].Provider)
+	}
+}

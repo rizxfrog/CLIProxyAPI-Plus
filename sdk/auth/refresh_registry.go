@@ -13,6 +13,8 @@ func init() {
 	registerRefreshLead("kimi", func() Authenticator { return NewKimiAuthenticator() })
 	registerRefreshLead("codebuddy-cn", func() Authenticator { return NewCodeBuddyCNAuthenticator() })
 	registerRefreshLead("codebuddy-ai", func() Authenticator { return NewCodeBuddyAIAuthenticator() })
+	registerRefreshLead("minimax", func() Authenticator { return NewMinimaxAuthenticator() })
+	registerRefreshLead("minimax-cn", func() Authenticator { return NewMinimaxCNAuthenticator() })
 	registerRefreshLead("qoder-cn", func() Authenticator { return NewQoderCNAuthenticator() })
 	registerRefreshLead("qoder-ai", func() Authenticator { return NewQoderAIAuthenticator() })
 	registerRefreshLead("kimi-ai", func() Authenticator { return NewKimiAIAuthenticator() })

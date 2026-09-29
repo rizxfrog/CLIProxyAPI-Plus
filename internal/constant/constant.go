@@ -31,6 +31,16 @@ const (
 	// CodeBuddyAI represents the CodeBuddy AI (international) provider identifier.
 	CodeBuddyAI = "codebuddy-ai"
 
+	// Minimax represents the MiniMax Code international managed-account provider
+	// identifier. It authenticates with an OAuth 2.0 device-code grant against
+	// account.minimax.io and speaks Anthropic Messages to the managed agent
+	// backend at agent.minimax.io.
+	Minimax = "minimax"
+
+	// MinimaxCN represents the MiniMax Code mainland-China managed-account
+	// provider identifier (account.minimax.cn / agent.minimax.cn).
+	MinimaxCN = "minimax-cn"
+
 	// DeepSeekWeb represents the DeepSeek authenticated web-session provider identifier.
 	DeepSeekWeb = "deepseek-web"
 

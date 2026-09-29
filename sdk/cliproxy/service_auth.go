@@ -23,6 +23,8 @@ func newDefaultAuthManager() *sdkAuth.Manager {
 		sdkAuth.NewClaudeAuthenticator(),
 		sdkAuth.NewCodeBuddyCNAuthenticator(),
 		sdkAuth.NewCodeBuddyAIAuthenticator(),
+		sdkAuth.NewMinimaxAuthenticator(),
+		sdkAuth.NewMinimaxCNAuthenticator(),
 		sdkAuth.NewQoderCNAuthenticator(),
 		sdkAuth.NewQoderAIAuthenticator(),
 		sdkAuth.NewAntigravityAuthenticator(),

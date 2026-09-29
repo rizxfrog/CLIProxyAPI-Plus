@@ -115,6 +115,8 @@ func main() {
 	var qoderCNLogin bool
 	var qoderAILogin bool
 	var codeBuddyAILogin bool
+	var minimaxLogin bool
+	var minimaxCNLogin bool
 	var kimiAILogin bool
 	var xaiLogin bool
 	var devinLogin bool
@@ -148,6 +150,8 @@ func main() {
 	flag.BoolVar(&kimiAILogin, "kimi-ai-login", false, "Login to Kimi.ai using OAuth")
 	flag.BoolVar(&codeBuddyCNLogin, "codebuddy-cn-login", false, "Login to CodeBuddy CN using OAuth")
 	flag.BoolVar(&codeBuddyAILogin, "codebuddy-ai-login", false, "Login to CodeBuddy AI (international) using OAuth")
+	flag.BoolVar(&minimaxLogin, "minimax-login", false, "Login to MiniMax Code (international) using OAuth device flow")
+	flag.BoolVar(&minimaxCNLogin, "minimax-cn-login", false, "Login to MiniMax Code (China) using OAuth device flow")
 	flag.BoolVar(&qoderCNLogin, "qoder-cn-login", false, "Login to Qoder CN using OAuth")
 	flag.BoolVar(&qoderAILogin, "qoder-ai-login", false, "Login to Qoder AI (international) using OAuth")
 	flag.BoolVar(&xaiLogin, "xai-login", false, "Login to xAI using OAuth")
@@ -664,7 +668,7 @@ func main() {
 		CallbackPort: oauthCallbackPort,
 	}
 
-	commandMode := vertexImport != "" || antigravityLogin || codexLogin || codexDeviceLogin || claudeLogin || kimiLogin || kimiAILogin || codeBuddyCNLogin || codeBuddyAILogin || qoderCNLogin || qoderAILogin || xaiLogin || devinLogin || metaLogin || clineLogin
+	commandMode := vertexImport != "" || antigravityLogin || codexLogin || codexDeviceLogin || claudeLogin || kimiLogin || kimiAILogin || codeBuddyCNLogin || codeBuddyAILogin || minimaxLogin || minimaxCNLogin || qoderCNLogin || qoderAILogin || xaiLogin || devinLogin || metaLogin || clineLogin
 	cloudConfigMissing := isCloudDeploy && !configFileExists
 	homeMode := configLoadedFromHome || (cfg != nil && cfg.Home.Enabled)
 	exampleAPIKeySafeMode := shouldEnableExampleAPIKeySafeMode(cfg, commandMode, tuiMode, standalone, cloudConfigMissing, homeMode)
@@ -740,6 +744,10 @@ func main() {
 		cmd.DoCodeBuddyCNLogin(cfg, options)
 	} else if codeBuddyAILogin {
 		cmd.DoCodeBuddyAILogin(cfg, options)
+	} else if minimaxLogin {
+		cmd.DoMinimaxLogin(cfg, options)
+	} else if minimaxCNLogin {
+		cmd.DoMinimaxCNLogin(cfg, options)
 	} else if qoderCNLogin {
 		cmd.DoQoderCNLogin(cfg, options)
 	} else if qoderAILogin {

@@ -350,6 +350,11 @@ func tokenAccountingSemanticsFor(provider, executorType string) tokenAccountingS
 	if strings.Contains(value, "claude") || strings.Contains(value, "anthropic") {
 		return tokenAccountingSemanticsIndependent
 	}
+	// The MiniMax Code managed backend speaks the Anthropic Messages wire format,
+	// so its usage reports independent input/output token counts like Claude.
+	if strings.Contains(value, "minimax") {
+		return tokenAccountingSemanticsIndependent
+	}
 	for _, marker := range []string{"gemini", "aistudio", "antigravity", "vertex", "interaction"} {
 		if strings.Contains(value, marker) {
 			return tokenAccountingSemanticsSeparateReasoning

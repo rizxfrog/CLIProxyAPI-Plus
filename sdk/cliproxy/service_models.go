@@ -162,6 +162,9 @@ func (s *Service) registerModelsForAuthWithCache(ctx context.Context, a *coreaut
 	case "kimi", "kimi-ai", "kimi.ai", "kimi.com":
 		models = registry.GetKimiModels()
 		models = applyExcludedModels(models, excluded)
+	case constant.Minimax, constant.MinimaxCN:
+		models = registry.GetMinimaxModels()
+		models = applyExcludedModels(models, excluded)
 	case "codebuddy-cn":
 		models = registry.GetCodeBuddyCNModels()
 		if entry := s.resolveConfigCodeBuddyCNKey(a); entry != nil {

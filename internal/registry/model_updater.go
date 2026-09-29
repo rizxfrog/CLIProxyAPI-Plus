@@ -163,6 +163,11 @@ func tryRefreshModels(ctx context.Context, urls []string, label string) {
 	if len(parsed.Meta) == 0 && oldData != nil && len(oldData.Meta) > 0 {
 		parsed.Meta = oldData.Meta
 	}
+	// MiniMax Code managed-account models are built in and not published in the
+	// remote catalog; keep them when a refresh omits the section.
+	if len(parsed.Minimax) == 0 && oldData != nil && len(oldData.Minimax) > 0 {
+		parsed.Minimax = oldData.Minimax
+	}
 
 	// Detect changes before updating store.
 	changed := detectChangedProviders(oldData, parsed)
@@ -270,6 +275,7 @@ func detectChangedProviders(oldData, newData *staticModelsJSON) []string {
 		{"qoder-ai", oldData.QoderAI, newData.QoderAI},
 		{"meta", oldData.Meta, newData.Meta},
 		{"cline", oldData.Cline, newData.Cline},
+		{"minimax", oldData.Minimax, newData.Minimax},
 	}
 
 	seen := make(map[string]bool, len(sections))

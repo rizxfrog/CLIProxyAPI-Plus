@@ -21,6 +21,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/auth/codex"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/auth/kimi"
 	metaauth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/meta"
+	minimaxauth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/minimax"
 	qodercnauth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/qodercn"
 	traeauth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/trae"
 	xaiauth "github.com/router-for-me/CLIProxyAPI/v7/internal/auth/xai"
@@ -1576,4 +1577,133 @@ func clineIdentitySuffix(token *clineauth.TokenData) string {
 		return fmt.Sprintf("%d", time.Now().UnixMilli())
 	}
 	return strings.NewReplacer("/", "_", "\\", "_", "@", "_at_", " ", "_").Replace(identity)
+}
+
+// minimaxOAuthRequestSpec parameterizes the MiniMax Code device-flow management
+// login so the international and mainland deployments share one implementation.
+type minimaxOAuthRequestSpec struct {
+	provider    string
+	label       string
+	fileNamePre string
+	region      minimaxauth.Region
+}
+
+var minimaxRequestSpec = minimaxOAuthRequestSpec{
+	provider:    constant.Minimax,
+	label:       "MiniMax Code (International)",
+	fileNamePre: "minimax",
+	region:      minimaxauth.RegionEN,
+}
+
+var minimaxCNRequestSpec = minimaxOAuthRequestSpec{
+	provider:    constant.MinimaxCN,
+	label:       "MiniMax Code (China)",
+	fileNamePre: "minimax-cn",
+	region:      minimaxauth.RegionCN,
+}
+
+// RequestMinimaxToken starts the MiniMax Code international OAuth device flow
+// and polls for tokens in the background.
+func (h *Handler) RequestMinimaxToken(c *gin.Context) {
+	h.requestMinimaxToken(c, minimaxRequestSpec)
+}
+
+// RequestMinimaxCNToken starts the MiniMax Code mainland China OAuth device
+// flow and polls for tokens in the background.
+func (h *Handler) RequestMinimaxCNToken(c *gin.Context) {
+	h.requestMinimaxToken(c, minimaxCNRequestSpec)
+}
+
+func (h *Handler) requestMinimaxToken(c *gin.Context, spec minimaxOAuthRequestSpec) {
+	ctx := PopulateAuthContext(context.Background(), c)
+	client := minimaxauth.NewClient(h.cfg, spec.region)
+	device, errStart := client.StartDeviceAuthorization(ctx)
+	if errStart != nil {
+		log.Errorf("Failed to start %s authorization: %v", spec.label, errStart)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start " + spec.label + " authorization"})
+		return
+	}
+	// The state used to correlate the session is the user code, which the
+	// backend returns alongside the verification URI and is URL/state safe.
+	state := strings.TrimSpace(device.UserCode)
+	if errState := ValidateOAuthState(state); errState != nil {
+		log.WithError(errState).Errorf("%s returned invalid authorization state", spec.label)
+		c.JSON(http.StatusBadGateway, gin.H{"error": "invalid authorization state"})
+		return
+	}
+	RegisterOAuthSession(state, spec.provider)
+
+	go func() {
+		pollCtx, cancelPoll := context.WithCancel(ctx)
+		defer cancelPoll()
+		go watchOAuthSessionCancel(pollCtx, cancelPoll, state, spec.provider)
+		token, errPoll := client.PollDeviceToken(pollCtx, device)
+		if errPoll != nil {
+			if !IsOAuthSessionPending(state, spec.provider) {
+				return
+			}
+			log.Errorf("%s authentication failed: %v", spec.label, errPoll)
+			SetOAuthSessionError(state, oauthSessionErrorWithCause("Authentication failed", errPoll))
+			return
+		}
+		if !IsOAuthSessionPending(state, spec.provider) {
+			return
+		}
+		metadata := map[string]any{
+			"type":         spec.provider,
+			"auth_kind":    "oauth",
+			"access_token": token.AccessToken,
+			"token_type":   token.TokenType,
+			"expires_in":   token.ExpiresIn,
+			"base_url":     spec.region.InferenceBaseURL(),
+			"region":       string(spec.region),
+			"timestamp":    time.Now().UnixMilli(),
+		}
+		if strings.TrimSpace(token.RefreshToken) != "" {
+			metadata["refresh_token"] = token.RefreshToken
+		}
+		if !token.ExpiresAt.IsZero() {
+			metadata["expired"] = token.ExpiresAt.UTC().Format(time.RFC3339)
+		}
+		if token.AccountID != "" {
+			metadata["account_id"] = token.AccountID
+		}
+		if token.Subject != "" {
+			metadata["subject"] = token.Subject
+		}
+		fileName := fmt.Sprintf("%s-%d.json", spec.fileNamePre, time.Now().UnixMilli())
+		record := &coreauth.Auth{
+			ID:       fileName,
+			Provider: spec.provider,
+			FileName: fileName,
+			Label:    spec.label,
+			Metadata: metadata,
+			Attributes: map[string]string{
+				coreauth.AttributeAuthKind: coreauth.AuthKindOAuth,
+				"base_url":                 spec.region.InferenceBaseURL(),
+				"minimax_region":           string(spec.region),
+			},
+		}
+		if errGuard := guardOAuthSessionPendingForSave(state, spec.provider); errGuard != nil {
+			return
+		}
+		savedPath, errSave := h.saveTokenRecord(ctx, record)
+		if errSave != nil {
+			log.Errorf("Failed to save %s token: %v", spec.label, errSave)
+			SetOAuthSessionError(state, "Failed to save authentication tokens")
+			return
+		}
+		CompleteOAuthSession(state)
+		fmt.Printf("%s authentication successful! Token saved to %s\n", spec.label, savedPath)
+	}()
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":           "ok",
+		"url":              device.AuthorizationURL(),
+		"state":            state,
+		"flow":             "device",
+		"user_code":        device.UserCode,
+		"expires_in":       device.ExpiresIn,
+		"interval_seconds": device.Interval,
+	})
 }

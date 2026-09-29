@@ -311,6 +311,10 @@ func (s *Service) registerExecutorForAuth(a *coreauth.Auth, forceReplace bool) {
 		s.coreManager.RegisterExecutor(executor.NewCodeBuddyCNExecutor(cfg))
 	case constant.CodeBuddyAI:
 		s.coreManager.RegisterExecutor(executor.NewCodeBuddyAIExecutor(cfg))
+	case constant.Minimax:
+		s.coreManager.RegisterExecutor(executor.NewMinimaxExecutor(cfg))
+	case constant.MinimaxCN:
+		s.coreManager.RegisterExecutor(executor.NewMinimaxCNExecutor(cfg))
 	case constant.DeepSeekWeb:
 		s.coreManager.RegisterExecutor(executor.NewDeepSeekWebExecutor(cfg))
 	case constant.Xiaohuanxiong:

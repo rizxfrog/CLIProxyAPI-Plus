@@ -27,6 +27,8 @@ var oauthProviders = []oauthProvider{
 	{"Kimi (kimi.ai)", "kimi-ai-auth-url", "🟫", true},
 	{"CodeBuddy CN", "codebuddy-cn-auth-url", "🟦", true},
 	{"CodeBuddy AI", "codebuddy-ai-auth-url", "🟦", true},
+	{"MiniMax Code (Intl)", "minimax-auth-url", "🟨", true},
+	{"MiniMax Code (CN)", "minimax-cn-auth-url", "🟨", true},
 	{"Qoder CN", "qoder-cn-auth-url", "🟪", true},
 	{"Qoder AI", "qoder-ai-auth-url", "🟪", true},
 	{"xAI", "xai-auth-url", "⬛", true},
@@ -369,6 +371,10 @@ func (m oauthTabModel) submitCallback(callbackURL string) tea.Cmd {
 					providerKey = "codebuddy-cn"
 				case "codebuddy-ai-auth-url":
 					providerKey = "codebuddy-ai"
+				case "minimax-auth-url":
+					providerKey = "minimax"
+				case "minimax-cn-auth-url":
+					providerKey = "minimax-cn"
 				case "qoder-cn-auth-url":
 					providerKey = "qoder-cn"
 				case "qoder-ai-auth-url":
