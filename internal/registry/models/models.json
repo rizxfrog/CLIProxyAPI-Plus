@@ -5013,12 +5013,64 @@
    ]
   },
   {
+   "id": "space-bunny",
+   "object": "model",
+   "created": 1761148800,
+   "owned_by": "tencent",
+   "type": "codebuddy-cn",
+   "display_name": "space-bunny x0.03",
+   "description": "GLM-5.3 via CodeBuddy CN",
+   "context_length": 1000000,
+   "max_completion_tokens": 48000,
+   "thinking": {
+    "zero_allowed": true,
+    "levels": [
+     "low",
+     "medium",
+     "high"
+    ]
+   },
+   "supportedInputModalities": [
+    "text",
+    "image"
+   ],
+   "supportedOutputModalities": [
+    "text"
+   ]
+  },
+  {
    "id": "glm-5.3",
    "object": "model",
    "created": 1761148800,
    "owned_by": "tencent",
    "type": "codebuddy-cn",
    "display_name": "GLM-5.3",
+   "description": "GLM-5.3 via CodeBuddy CN",
+   "context_length": 1000000,
+   "max_completion_tokens": 48000,
+   "thinking": {
+    "zero_allowed": true,
+    "levels": [
+     "low",
+     "medium",
+     "high"
+    ]
+   },
+   "supportedInputModalities": [
+    "text",
+    "image"
+   ],
+   "supportedOutputModalities": [
+    "text"
+   ]
+  },
+  {
+   "id": "glm-5.3-flash",
+   "object": "model",
+   "created": 1761148800,
+   "owned_by": "tencent",
+   "type": "codebuddy-cn",
+   "display_name": "GLM-5.3-FLash x0.06",
    "description": "GLM-5.3 via CodeBuddy CN",
    "context_length": 1000000,
    "max_completion_tokens": 48000,
