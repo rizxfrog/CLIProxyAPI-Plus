@@ -5609,6 +5609,32 @@
    ]
   },
   {
+   "id": "deepseek-v4.1-flash",
+   "object": "model",
+   "created": 1761148800,
+   "owned_by": "tencent",
+   "type": "codebuddy-cn",
+   "display_name": "DeepSeek-V4.1-Flash",
+   "description": "DeepSeek-V4.1-Flash via CodeBuddy AI",
+   "context_length": 1000000,
+   "max_completion_tokens": 50000,
+   "thinking": {
+    "zero_allowed": true,
+    "levels": [
+     "low",
+     "medium",
+     "high"
+    ]
+   },
+   "supportedInputModalities": [
+    "text",
+    "image"
+   ],
+   "supportedOutputModalities": [
+    "text"
+   ]
+  },
+  {
    "id": "gpt-5.5",
    "object": "model",
    "created": 1756684800,

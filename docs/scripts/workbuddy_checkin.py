@@ -7,6 +7,7 @@ WorkBuddy 每日签到脚本
 接口（从 app.asar 逆向提取）:
   - 查询状态:  POST {endpoint}/v2/billing/meter/checkin-activity-status
   - 执行签到:  POST {endpoint}/v2/billing/meter/daily-checkin
+  - 刷新凭证:  POST {endpoint}/v2/plugin/auth/token/refresh   (仅 --refresh-token)
 
 鉴权:
   - Authorization: Bearer <accessToken>
@@ -19,11 +20,22 @@ WorkBuddy 每日签到脚本
   macOS:    ~/Library/Application Support/CodeBuddyExtension/Data/Public/auth/<id>.info
   Linux:    ~/.local/share/CodeBuddyExtension/Data/Public/auth/<id>.info
 
+刷新模式（--refresh-token）:
+  先用凭证里的 refresh_token 调 /v2/plugin/auth/token/refresh 轮换 accessToken
+  （头部 X-Refresh-Token + X-Auth-Refresh-Source: plugin，与 Go 端
+  internal/auth/codebuddycn/codebuddycn.go 的 Client.Refresh 对齐），把新的
+  accessToken/refreshToken/expired 原子写回原凭证文件，再用新 token 查询并签到。
+  刷新失败时不发后续请求，直接按失败计；批量模式下继续处理其他凭证。
+  该模式需要凭证文件（--auth-file/--auth-dir），不能与 --token/--uid 手动模式同用。
+  注意：脚本默认不刷新，凭证过期时需先通过代理或桌面端登录更新。
+
 用法:
   uv run workbuddy_checkin.py                     # 查询状态 + 签到
   uv run workbuddy_checkin.py status              # 仅查询状态
   uv run workbuddy_checkin.py --token <TOKEN> --uid <UID>   # 手动指定
+  uv run workbuddy_checkin.py --refresh-token     # 刷新凭证后再查询 + 签到
   uv run workbuddy_checkin.py --auth-dir <DIR>    # 对目录下所有 .json 凭证文件签到
+  uv run workbuddy_checkin.py --auth-dir <DIR> --refresh-token  # 批量刷新凭证并签到
   uv run workbuddy_checkin.py --auth-dir <DIR> --prefix codebuddy  # 只处理 codebuddy*.json
   uv run workbuddy_checkin.py --auth-file <AUTH_FILE> # 对单个文件执行签到
 """
@@ -35,7 +47,9 @@ import base64
 import json
 import os
 import sys
+import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 # 尽量零依赖：优先用 requests，否则退回标准库 urllib
 try:
@@ -46,6 +60,12 @@ except ImportError:
 # ---------------------------------------------------------------- 配置
 DEFAULT_ENDPOINT = "https://copilot.tencent.com"
 STAGING_ENDPOINT = "https://staging.codebuddy.cn"
+
+# 凭证刷新（--refresh-token）：与 Go 端 internal/auth/codebuddycn 的
+# Client.Refresh 使用同一个插件级刷新端点与头部。
+REFRESH_PATH = "/v2/plugin/auth/token/refresh"
+REFRESH_SOURCE = "plugin"
+UA_VERSION = "5.3.14"
 
 AUTH_ID = "auth"  # authenticationId，可用 authentication.id 覆盖
 AUTH_REL_PATH = ("CodeBuddyExtension", "Data", "Public", "auth")
@@ -99,6 +119,8 @@ def load_session(auth_file: Path | None) -> dict:
       1. 桌面端 auth.info：{ auth: { accessToken, domain }, account: { uid, enterpriseId } }
       2. CLI 凭证（codebuddy-cn 等）：{ access_token, base_url, refresh_token, ... }
          此时 uid 从 JWT 的 sub 自动解出，endpoint 取自 base_url。
+
+    额外的 refresh_token / _layout / _path 供 --refresh-token 模式轮换并写回凭证。
     """
     path = auth_file or next((p for p in _auth_candidates() if p.is_file()), None)
     if path is None:
@@ -125,6 +147,8 @@ def load_session(auth_file: Path | None) -> dict:
             "enterpriseId": data.get("enterprise_id") or data.get("enterpriseId"),
             "domain": data.get("domain"),
             "endpoint": endpoint or None,
+            "refresh_token": (data.get("refresh_token") or data.get("refreshToken") or "").strip(),
+            "_layout": "cli",
             "_path": str(path),
         }
 
@@ -142,6 +166,8 @@ def load_session(auth_file: Path | None) -> dict:
         "enterpriseId": account.get("enterpriseId"),
         "domain": auth.get("domain"),
         "endpoint": None,
+        "refresh_token": (auth.get("refreshToken") or auth.get("refresh_token") or "").strip(),
+        "_layout": "desktop",
         "_path": str(path),
     }
 
@@ -178,7 +204,7 @@ def _http_json(url: str, headers: dict, body: dict, timeout: int) -> dict:
     return {"status": status, "payload": payload}
 
 
-def build_headers(session: dict, ua_version: str = "5.3.14") -> dict:
+def build_headers(session: dict, ua_version: str = UA_VERSION) -> dict:
     h = {
         "Accept": "application/json",
         "Content-Type": "application/json",
@@ -192,6 +218,117 @@ def build_headers(session: dict, ua_version: str = "5.3.14") -> dict:
     if session.get("domain"):
         h["X-Domain"] = str(session["domain"])
     return h
+
+
+# ---------------------------------------------------------------- 凭证刷新
+def _refresh_domain(endpoint: str, session: dict) -> str:
+    """X-Domain：优先凭证里的域，否则用 endpoint 的 host（与 Go 端 domain 默认值一致）。"""
+    domain = str(session.get("domain") or "").strip()
+    if domain:
+        return domain
+    return urlsplit(endpoint).netloc or "copilot.tencent.com"
+
+
+def refresh_credential(endpoint: str, session: dict, timeout: int) -> dict:
+    """用 refresh_token 换新 token 对，返回 {token, refresh_token, expires_in, expired}。
+
+    头与 Go 端 internal/auth/codebuddycn.Client.Refresh 对齐：插件级刷新端点，
+    X-Refresh-Token + X-Auth-Refresh-Source: plugin，body 为 {}。
+    """
+    refresh_token = (session.get("refresh_token") or "").strip()
+    if not refresh_token:
+        raise RuntimeError("凭证缺少 refresh_token，无法刷新（--refresh-token 需要可轮换的凭证文件）")
+
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "User-Agent": f"WorkBuddy/{UA_VERSION}",
+        "X-Requested-With": "XMLHttpRequest",
+        "X-Domain": _refresh_domain(endpoint, session),
+        "X-No-Authorization": "true",
+        "X-No-User-Id": "true",
+        "X-Product": "SaaS",
+        "X-Refresh-Token": refresh_token,
+        "X-Auth-Refresh-Source": REFRESH_SOURCE,
+    }
+    r = _http_json(f"{endpoint}{REFRESH_PATH}", headers, {}, timeout)
+    payload = r.get("payload")
+    if r["status"] != 200:
+        detail = payload.get("msg") if isinstance(payload, dict) else None
+        raise RuntimeError(f"刷新失败 HTTP {r['status']}: {detail or ''}".rstrip())
+    code = payload.get("code") if isinstance(payload, dict) else None
+    if code != 0:
+        msg = payload.get("msg") if isinstance(payload, dict) else None
+        raise RuntimeError(f"刷新被拒绝 code={code}: {msg or ''}".rstrip())
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    access = (data.get("accessToken") or "").strip()
+    if not access:
+        raise RuntimeError("刷新响应缺少 accessToken")
+    expires_in = data.get("expiresIn") or 0
+    expired = ""
+    try:
+        if int(expires_in) > 0:
+            expired = time.strftime(
+                "%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + int(expires_in))
+            )
+    except (TypeError, ValueError):
+        expires_in = 0
+    return {
+        "token": access,
+        "refresh_token": (data.get("refreshToken") or refresh_token).strip(),
+        "expires_in": int(expires_in or 0),
+        "expired": expired,
+    }
+
+
+def save_session(session: dict, refreshed: dict) -> None:
+    """把轮换后的凭证原子写回原文件，保留其余字段（对齐 Go 端 filestore 行为）。"""
+    raw_path = session.get("_path")
+    if not raw_path:
+        raise RuntimeError("手动 --token 模式没有凭证文件，无法写回刷新结果")
+    path = Path(raw_path)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        raise RuntimeError(f"回写前读取凭证失败: {path}: {e}") from None
+
+    if session.get("_layout") == "desktop":
+        # auth.info is the desktop client's own file; only touch fields inside
+        # "auth" so no foreign keys leak into its schema.
+        target = data.setdefault("auth", {})
+        target["accessToken"] = refreshed["token"]
+        if refreshed["refresh_token"]:
+            target["refreshToken"] = refreshed["refresh_token"]
+    else:
+        # CLIProxyAPI auth file: mirror the metadata keys the Go filestore writes.
+        data["access_token"] = refreshed["token"]
+        if refreshed["refresh_token"]:
+            data["refresh_token"] = refreshed["refresh_token"]
+        if refreshed["expires_in"] > 0:
+            data["expires_in"] = refreshed["expires_in"]
+        if refreshed["expired"]:
+            data["expired"] = refreshed["expired"]
+        data["timestamp"] = int(time.time() * 1000)
+
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def ensure_fresh_credential(endpoint: str, session: dict, timeout: int) -> dict:
+    """--refresh-token 模式：刷新凭证、写回文件，并更新内存中的会话。"""
+    print("[i] 刷新登录凭证...")
+    refreshed = refresh_credential(endpoint, session, timeout)
+    session = dict(session)
+    session["token"] = refreshed["token"]
+    session["refresh_token"] = refreshed["refresh_token"]
+    uid = _decode_jwt_sub(refreshed["token"])
+    if uid:
+        session["uid"] = uid
+    save_session(session, refreshed)
+    print(f"[✓] 凭证已刷新并写回 {session['_path']}"
+          + (f"（expired={refreshed['expired']}）" if refreshed["expired"] else ""))
+    return session
 
 
 # ---------------------------------------------------------------- 业务
@@ -210,8 +347,16 @@ def _pretty(data: dict) -> None:
 
 
 def _run_one(args: argparse.Namespace, session: dict, endpoint: str) -> int:
-    """对单个登录态执行 status/checkin。"""
+    """对单个登录态执行 status/checkin（--refresh-token 时先轮换凭证）。"""
     print(f"[i] endpoint: {endpoint}")
+
+    if args.refresh_token:
+        # 刷新失败时不再发后续请求，避免用已知过期的凭证误判。
+        try:
+            session = ensure_fresh_credential(endpoint, session, args.timeout)
+        except Exception as e:
+            print(f"[✗] 凭证刷新失败: {e}")
+            return 1
 
     if args.action == "status":
         r = checkin_status(endpoint, session, args.timeout)
@@ -258,7 +403,7 @@ def _auth_dir_files(auth_dir: Path, prefix: str | None = None) -> list[Path]:
     return files
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="WorkBuddy 每日签到")
     ap.add_argument("action", nargs="?", default="checkin", choices=["status", "checkin"])
     ap.add_argument("--endpoint", default=os.environ.get("WORKBUDDY_ENDPOINT", DEFAULT_ENDPOINT))
@@ -279,8 +424,13 @@ def main() -> int:
     ap.add_argument("--uid", default=None)
     ap.add_argument("--enterprise-id", default=None)
     ap.add_argument("--domain", default=None)
+    ap.add_argument(
+        "--refresh-token",
+        action="store_true",
+        help="签到前先用凭证里的 refresh_token 轮换 token 并写回凭证文件",
+    )
     ap.add_argument("--timeout", type=int, default=15)
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     if args.staging:
         args.endpoint = STAGING_ENDPOINT
@@ -288,6 +438,9 @@ def main() -> int:
 
     if args.prefix and not args.auth_dir:
         raise SystemExit("--prefix 需要配合 --auth-dir 使用")
+
+    if args.refresh_token and args.token:
+        raise SystemExit("--refresh-token 需要凭证文件（--auth-file/--auth-dir），不能与 --token 同用")
 
     if args.token and args.uid:
         session = {
