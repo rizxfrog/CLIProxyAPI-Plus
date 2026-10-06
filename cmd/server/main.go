@@ -173,7 +173,7 @@ func main() {
 	flag.BoolVar(&tuiMode, "tui", false, "Start with terminal management UI")
 	flag.BoolVar(&standalone, "standalone", false, "In TUI mode, start an embedded local server")
 	flag.StringVar(&managementBaseURL, "management-base-url", "", "Base URL of remote management API for TUI client mode (e.g. https://proxy.example.com)")
-	flag.BoolVar(&localModel, "local-model", false, "Use embedded models.json and codex_client_models.json only, skip remote model catalog fetching")
+	flag.BoolVar(&localModel, "local-model", false, "Use embedded model catalogs unless models.catalog, models.codex-catalog, models.devin-catalog, MODELS_FILE, or MODELS_URL overrides the source")
 
 	flag.CommandLine.Usage = func() {
 		out := flag.CommandLine.Output()
@@ -770,7 +770,10 @@ func main() {
 			return
 		}
 		if localModel && (!tuiMode || standalone) {
-			log.Info("Local model mode: using embedded model catalogs, remote model updates disabled")
+			// Embedded catalogs are the default source in local model mode;
+			// explicit models.catalog overrides still win. The management asset
+			// stays local as well.
+			log.Info("Local model mode: using embedded catalogs unless an explicit catalog source is configured")
 			managementasset.SetLocalModel(true)
 		}
 		if tuiMode {
@@ -778,7 +781,7 @@ func main() {
 				// Standalone mode: start an embedded local server and connect TUI client to it.
 				managementasset.StartAutoUpdater(context.Background(), configFilePath)
 				misc.StartAntigravityVersionUpdater(context.Background())
-				startModelCatalogUpdaters(localModel, cfg.Home.Enabled)
+				registry.SetLocalModelCatalogs(localModel)
 				hook := tui.NewLogHook(2000)
 				hook.SetFormatter(&logging.LogFormatter{})
 				log.AddHook(hook)
@@ -853,7 +856,7 @@ func main() {
 			// Start the main proxy service
 			managementasset.StartAutoUpdater(context.Background(), configFilePath)
 			misc.StartAntigravityVersionUpdater(context.Background())
-			startModelCatalogUpdaters(localModel, cfg.Home.Enabled)
+			registry.SetLocalModelCatalogs(localModel)
 			cmd.StartServiceWithPluginHost(cfg, configFilePath, password, pluginHost, serverOptions...)
 		}
 	}
@@ -877,31 +880,6 @@ func resolveManagementBaseURL(flagURL string, cfg *config.Config) string {
 		port = cfg.Port
 	}
 	return fmt.Sprintf("http://127.0.0.1:%d", port)
-}
-
-// modelCatalogUpdaterPlan decides which remote model catalogs should refresh.
-// Codex client and Devin catalogs still refresh under Home mode because
-// template metadata and Devin models stay edge-local.
-func modelCatalogUpdaterPlan(localModel, homeEnabled bool) (startModels, startCodexClient, startDevin bool) {
-	if localModel {
-		return false, false, false
-	}
-	return !homeEnabled, true, true
-}
-
-func startModelCatalogUpdaters(localModel, homeEnabled bool) {
-	startModels, startCodexClient, startDevin := modelCatalogUpdaterPlan(localModel, homeEnabled)
-	if startCodexClient {
-		registry.StartCodexClientModelsUpdater(context.Background())
-	}
-	if startDevin {
-		registry.StartDevinModelsUpdater(context.Background())
-	}
-	if startModels {
-		registry.StartModelsUpdater(context.Background())
-	} else if homeEnabled {
-		log.Info("Home mode: remote models.json updates disabled; Codex client model list follows Home model IDs")
-	}
 }
 
 func pluginBootstrapConfigPath(args []string, defaultPath string) string {

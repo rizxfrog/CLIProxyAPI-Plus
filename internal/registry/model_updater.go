@@ -5,9 +5,6 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"os"
 	"reflect"
 	"strings"
 	"sync"
@@ -16,10 +13,8 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-const (
-	modelsFetchTimeout    = 30 * time.Second
-	modelsRefreshInterval = 3 * time.Hour
-)
+// ModelsRefreshInterval is the shared cadence for model catalogs and account entitlements.
+const ModelsRefreshInterval = 3 * time.Hour
 
 var modelsURLs = []string{
 	"https://raw.githubusercontent.com/router-for-me/models/refs/heads/main/models.json",
@@ -35,8 +30,6 @@ type modelStore struct {
 }
 
 var modelsCatalogStore = &modelStore{}
-
-var updaterOnce sync.Once
 
 // ModelRefreshCallback is invoked when startup or periodic model refresh detects changes.
 // changedProviders contains the provider names whose model definitions changed.
@@ -73,168 +66,12 @@ func init() {
 	}
 }
 
-// StartModelsUpdater loads the model catalog from MODELS_FILE when configured.
-// Otherwise it starts a background updater using MODELS_URL or the built-in
-// fallback URLs, fetching immediately and then every 3 hours. MODELS_FILE takes
-// precedence over MODELS_URL and is loaded once during startup.
+// StartModelsUpdater starts a background updater that fetches models
+// immediately on startup and then refreshes the model catalog every 3 hours
+// using the process default catalog source (see catalog_sources.go).
 // Safe to call multiple times; only one updater will run.
 func StartModelsUpdater(ctx context.Context) {
-	updaterOnce.Do(func() {
-		modelsFile, urls := configuredModelsSource()
-		if modelsFile != "" {
-			if err := loadModelsFromFile(modelsFile); err != nil {
-				log.Warnf("startup model file load failed, keeping embedded catalog: %v", err)
-				return
-			}
-			log.Infof("startup model catalog loaded from %s", modelsFile)
-			return
-		}
-		go runModelsUpdater(ctx, urls)
-	})
-}
-
-func configuredModelsSource() (string, []string) {
-	if modelsFile := strings.TrimSpace(os.Getenv("MODELS_FILE")); modelsFile != "" {
-		return modelsFile, nil
-	}
-	if modelsURL := strings.TrimSpace(os.Getenv("MODELS_URL")); modelsURL != "" {
-		return "", []string{modelsURL}
-	}
-	return "", append([]string(nil), modelsURLs...)
-}
-
-func loadModelsFromFile(path string) error {
-	data, errRead := os.ReadFile(path)
-	if errRead != nil {
-		return fmt.Errorf("read models file %s: %w", path, errRead)
-	}
-	oldData := getModels()
-	if errLoad := loadModelsFromBytes(data, path); errLoad != nil {
-		return errLoad
-	}
-	changed := detectChangedProviders(oldData, getModels())
-	if len(changed) > 0 {
-		notifyModelRefresh(changed)
-	}
-	return nil
-}
-
-func runModelsUpdater(ctx context.Context, urls []string) {
-	tryStartupRefresh(ctx, urls)
-	periodicRefresh(ctx, urls)
-}
-
-func periodicRefresh(ctx context.Context, urls []string) {
-	ticker := time.NewTicker(modelsRefreshInterval)
-	defer ticker.Stop()
-	log.Infof("periodic model refresh started (interval=%s)", modelsRefreshInterval)
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			tryPeriodicRefresh(ctx, urls)
-		}
-	}
-}
-
-// tryPeriodicRefresh fetches models from remote, compares with the current
-// catalog, and notifies the registered callback if any provider changed.
-func tryPeriodicRefresh(ctx context.Context, urls []string) {
-	tryRefreshModels(ctx, urls, "periodic model refresh")
-}
-
-// tryStartupRefresh fetches models from remote in the background during
-// process startup. It uses the same change detection as periodic refresh so
-// existing auth registrations can be updated after the callback is registered.
-func tryStartupRefresh(ctx context.Context, urls []string) {
-	tryRefreshModels(ctx, urls, "startup model refresh")
-}
-
-func tryRefreshModels(ctx context.Context, urls []string, label string) {
-	oldData := getModels()
-
-	parsed, url := fetchModelsFromRemote(ctx, urls)
-	if parsed == nil {
-		log.Warnf("%s: fetch failed from all URLs, keeping current data", label)
-		return
-	}
-
-	if len(parsed.Meta) == 0 && oldData != nil && len(oldData.Meta) > 0 {
-		parsed.Meta = oldData.Meta
-	}
-	// MiniMax Code managed-account models are built in and not published in the
-	// remote catalog; keep them when a refresh omits the section.
-	if len(parsed.Minimax) == 0 && oldData != nil && len(oldData.Minimax) > 0 {
-		parsed.Minimax = oldData.Minimax
-	}
-
-	// Detect changes before updating store.
-	changed := detectChangedProviders(oldData, parsed)
-
-	// Update store with new data regardless.
-	modelsCatalogStore.mu.Lock()
-	modelsCatalogStore.data = parsed
-	modelsCatalogStore.mu.Unlock()
-
-	if len(changed) == 0 {
-		log.Infof("%s completed from %s, no changes detected", label, url)
-		return
-	}
-
-	log.Infof("%s completed from %s, changes detected for providers: %v", label, url, changed)
-	notifyModelRefresh(changed)
-}
-
-// fetchModelsFromRemote tries all remote URLs and returns the parsed model catalog
-// along with the URL it was fetched from. Returns (nil, "") if all fetches fail.
-func fetchModelsFromRemote(ctx context.Context, urls []string) (*staticModelsJSON, string) {
-	client := &http.Client{Timeout: modelsFetchTimeout}
-	for _, url := range urls {
-		reqCtx, cancel := context.WithTimeout(ctx, modelsFetchTimeout)
-		req, err := http.NewRequestWithContext(reqCtx, "GET", url, nil)
-		if err != nil {
-			cancel()
-			log.Debugf("models fetch request creation failed for %s: %v", url, err)
-			continue
-		}
-
-		resp, err := client.Do(req)
-		if err != nil {
-			cancel()
-			log.Debugf("models fetch failed from %s: %v", url, err)
-			continue
-		}
-
-		if resp.StatusCode != 200 {
-			resp.Body.Close()
-			cancel()
-			log.Debugf("models fetch returned %d from %s", resp.StatusCode, url)
-			continue
-		}
-
-		data, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		cancel()
-
-		if err != nil {
-			log.Debugf("models fetch read error from %s: %v", url, err)
-			continue
-		}
-
-		var parsed staticModelsJSON
-		if err := json.Unmarshal(data, &parsed); err != nil {
-			log.Warnf("models parse failed from %s: %v", url, err)
-			continue
-		}
-		if err := validateModelsCatalog(&parsed); err != nil {
-			log.Warnf("models validate failed from %s: %v", url, err)
-			continue
-		}
-
-		return &parsed, url
-	}
-	return nil, ""
+	generalCatalogUpdater.configure(ctx, "")
 }
 
 // detectChangedProviders compares two model catalogs and returns provider names

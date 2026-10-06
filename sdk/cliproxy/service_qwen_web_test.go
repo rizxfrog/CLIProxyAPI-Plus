@@ -16,6 +16,11 @@ func TestRegisterQwenWebAccount(t *testing.T) {
 	defer modelRegistry.UnregisterClient(id)
 	service := &Service{cfg: &config.Config{}, coreManager: coreauth.NewManager(nil, nil, nil)}
 	auth := &coreauth.Auth{ID: id, Provider: "qwen-web", Metadata: map[string]any{"access_token": "test-session"}}
+	var errRegister error
+	auth, errRegister = service.coreManager.Register(context.Background(), auth)
+	if errRegister != nil {
+		t.Fatal(errRegister)
+	}
 	service.registerExecutorForAuth(auth, false)
 	registered, ok := service.coreManager.Executor("qwen-web")
 	if !ok {

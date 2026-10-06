@@ -5,17 +5,13 @@ import (
 	"testing"
 )
 
-func TestConfiguredModelsSource(t *testing.T) {
-	t.Run("defaults", func(t *testing.T) {
+func TestDefaultGeneralCatalogSource(t *testing.T) {
+	t.Run("no env override keeps official remote sources", func(t *testing.T) {
 		t.Setenv("MODELS_FILE", "")
 		t.Setenv("MODELS_URL", "")
 
-		modelsFile, urls := configuredModelsSource()
-		if modelsFile != "" {
-			t.Fatalf("modelsFile = %q, want empty", modelsFile)
-		}
-		if !reflect.DeepEqual(urls, modelsURLs) {
-			t.Fatalf("urls = %v, want %v", urls, modelsURLs)
+		if got := defaultGeneralCatalogSource(); got != "" {
+			t.Fatalf("defaultGeneralCatalogSource() = %q, want empty so the official URLs are used", got)
 		}
 	})
 
@@ -23,13 +19,8 @@ func TestConfiguredModelsSource(t *testing.T) {
 		t.Setenv("MODELS_FILE", "")
 		t.Setenv("MODELS_URL", " https://example.com/models.json ")
 
-		modelsFile, urls := configuredModelsSource()
-		if modelsFile != "" {
-			t.Fatalf("modelsFile = %q, want empty", modelsFile)
-		}
-		want := []string{"https://example.com/models.json"}
-		if !reflect.DeepEqual(urls, want) {
-			t.Fatalf("urls = %v, want %v", urls, want)
+		if got := defaultGeneralCatalogSource(); got != "https://example.com/models.json" {
+			t.Fatalf("defaultGeneralCatalogSource() = %q, want %q", got, "https://example.com/models.json")
 		}
 	})
 
@@ -37,14 +28,38 @@ func TestConfiguredModelsSource(t *testing.T) {
 		t.Setenv("MODELS_FILE", " /data/models.json ")
 		t.Setenv("MODELS_URL", "https://example.com/models.json")
 
-		modelsFile, urls := configuredModelsSource()
-		if modelsFile != "/data/models.json" {
-			t.Fatalf("modelsFile = %q, want %q", modelsFile, "/data/models.json")
-		}
-		if urls != nil {
-			t.Fatalf("urls = %v, want nil", urls)
+		if got := defaultGeneralCatalogSource(); got != "/data/models.json" {
+			t.Fatalf("defaultGeneralCatalogSource() = %q, want %q", got, "/data/models.json")
 		}
 	})
+}
+
+func TestEffectiveCatalogSourcesRespectsEnvDefault(t *testing.T) {
+	t.Setenv("MODELS_FILE", "/data/models.json")
+	t.Setenv("MODELS_URL", "https://example.com/models.json")
+
+	got := effectiveCatalogSources(CatalogSources{}, false, false)
+	if got.Catalog != "/data/models.json" {
+		t.Fatalf("env default catalog = %q, want %q", got.Catalog, "/data/models.json")
+	}
+
+	// An explicit models.catalog value overrides the environment default.
+	explicit := effectiveCatalogSources(CatalogSources{Catalog: "https://example.com/explicit.json"}, false, false)
+	if explicit.Catalog != "https://example.com/explicit.json" {
+		t.Fatalf("explicit catalog = %q, want the configured source", explicit.Catalog)
+	}
+
+	// --local-model selects the embedded catalog over the environment default.
+	local := effectiveCatalogSources(CatalogSources{}, true, false)
+	if local.Catalog != embeddedCatalogSource {
+		t.Fatalf("local catalog = %q, want %q", local.Catalog, embeddedCatalogSource)
+	}
+
+	// Home mode disables the general catalog regardless of the environment.
+	home := effectiveCatalogSources(CatalogSources{}, false, true)
+	if home.Catalog != "disabled" {
+		t.Fatalf("home catalog = %q, want disabled", home.Catalog)
+	}
 }
 
 func TestDetectChangedProvidersIncludesLocalProviders(t *testing.T) {
