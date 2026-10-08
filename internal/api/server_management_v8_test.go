@@ -118,6 +118,10 @@ func TestManagementV8IndependentContract(t *testing.T) {
 		"GET /v8/management/oauth/auth-url", "POST /v8/management/oauth/import", "POST /v8/management/oauth/callback",
 		"POST /v8/management/routing/cooldown/reset",
 		"GET /v8/management/floatboat-quota",
+		"GET /v8/management/codearts-quota", "GET /v8/management/qoder-cn-quota",
+		"GET /v8/management/qoder-ai-quota", "GET /v8/management/minimax-quota",
+		"GET /v8/management/provider-models", "GET /v8/management/provider-models/:provider",
+		"PUT /v8/management/provider-models/:provider", "DELETE /v8/management/provider-models/:provider",
 		"GET /v8/management/plugins/:id/quota", "POST /v8/management/plugins/:id/quota", "DELETE /v8/management/plugins/:id/quota",
 		"POST /v8/management/plugins/store/:id/install", "DELETE /v8/management/plugins/:id",
 	} {

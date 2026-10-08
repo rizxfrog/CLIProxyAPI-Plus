@@ -33,7 +33,21 @@ func (s *Server) registerManagementV8Routes() {
 	v8.POST("/requests/api-call", s.mgmt.APICall)
 	v8.POST("/routing/cooldown/reset", s.mgmt.ResetQuota)
 	v8.GET("/routing/model-definitions/:channel", s.mgmt.GetStaticModelDefinitions)
+
+	// Provider model management. The management panel addresses the v8 contract
+	// exclusively, so these must exist here and not only under v0.
+	v8.GET("/provider-models", s.mgmt.GetProviderModels)
+	v8.GET("/provider-models/:provider", s.mgmt.GetProviderModel)
+	v8.PUT("/provider-models/:provider", s.mgmt.PutProviderModel)
+	v8.DELETE("/provider-models/:provider", s.mgmt.DeleteProviderModel)
+
+	// Per-provider quota reads. Same reasoning as above: the v8 contract serves
+	// the panel, so each provider route is registered here as well as under v0.
 	v8.GET("/floatboat-quota", s.mgmt.GetFloatboatQuota)
+	v8.GET("/codearts-quota", s.mgmt.GetCodeArtsQuota)
+	v8.GET("/qoder-cn-quota", s.mgmt.GetQoderCNQuota)
+	v8.GET("/qoder-ai-quota", s.mgmt.GetQoderCNQuota)
+	v8.GET("/minimax-quota", s.mgmt.GetMinimaxQuota)
 
 	v8.GET("/observability/logs", s.mgmt.GetLogs)
 	v8.DELETE("/observability/logs", s.mgmt.DeleteLogs)
