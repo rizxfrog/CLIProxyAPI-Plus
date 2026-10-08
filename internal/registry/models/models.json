@@ -14089,5 +14089,462 @@
     "text"
    ]
   }
+ ],
+ "floatboat": [
+  {
+    "id": "deepseek-flash",
+    "object": "model",
+    "created": 1759276800,
+    "owned_by": "deepseek",
+    "type": "floatboat",
+    "display_name": "deepseek-flash",
+    "description": "FloatBoat managed-account model routed via https://newapi.aoe.chat (verified callable on this plan).",
+    "context_length": 128000,
+    "max_completion_tokens": 65536,
+    "supportedInputModalities": [
+      "text"
+    ],
+    "supportedOutputModalities": [
+      "text"
+    ]
+  },
+  {
+    "id": "deepseek-v4-flash",
+    "object": "model",
+    "created": 1759276800,
+    "owned_by": "deepseek",
+    "type": "floatboat",
+    "display_name": "deepseek-v4-flash",
+    "description": "FloatBoat managed-account model routed via https://newapi.aoe.chat (verified callable on this plan).",
+    "context_length": 256000,
+    "max_completion_tokens": 65536,
+    "supportedInputModalities": [
+      "text"
+    ],
+    "supportedOutputModalities": [
+      "text"
+    ]
+  },
+  {
+    "id": "deepseek-v4-pro",
+    "object": "model",
+    "created": 1759276800,
+    "owned_by": "deepseek",
+    "type": "floatboat",
+    "display_name": "deepseek-v4-pro",
+    "description": "FloatBoat managed-account model routed via https://newapi.aoe.chat (verified callable on this plan).",
+    "context_length": 256000,
+    "max_completion_tokens": 65536,
+    "supportedInputModalities": [
+      "text"
+    ],
+    "supportedOutputModalities": [
+      "text"
+    ]
+  },
+  {
+    "id": "gemini-2.5-flash",
+    "object": "model",
+    "created": 1759276800,
+    "owned_by": "google",
+    "type": "floatboat",
+    "display_name": "gemini-2.5-flash",
+    "description": "FloatBoat managed-account model routed via https://newapi.aoe.chat (verified callable on this plan).",
+    "context_length": 1000000,
+    "max_completion_tokens": 65536,
+    "supportedInputModalities": [
+      "text",
+      "image"
+    ],
+    "supportedOutputModalities": [
+      "text"
+    ]
+  },
+  {
+    "id": "gemini-2.5-flash-image",
+    "object": "model",
+    "created": 1759276800,
+    "owned_by": "google",
+    "type": "floatboat",
+    "display_name": "gemini-2.5-flash-image",
+    "description": "FloatBoat managed-account model routed via https://newapi.aoe.chat (verified callable on this plan).",
+    "context_length": 1000000,
+    "max_completion_tokens": 65536,
+    "supportedInputModalities": [
+      "text",
+      "image"
+    ],
+    "supportedOutputModalities": [
+      "text"
+    ]
+  },
+  {
+    "id": "gemini-2.5-flash-lite",
+    "object": "model",
+    "created": 1759276800,
+    "owned_by": "google",
+    "type": "floatboat",
+    "display_name": "gemini-2.5-flash-lite",
+    "description": "FloatBoat managed-account model routed via https://newapi.aoe.chat (verified callable on this plan).",
+    "context_length": 1000000,
+    "max_completion_tokens": 65536,
+    "supportedInputModalities": [
+      "text",
+      "image"
+    ],
+    "supportedOutputModalities": [
+      "text"
+    ]
+  },
+  {
+    "id": "gemini-2.5-pro",
+    "object": "model",
+    "created": 1759276800,
+    "owned_by": "google",
+    "type": "floatboat",
+    "display_name": "gemini-2.5-pro",
+    "description": "FloatBoat managed-account model routed via https://newapi.aoe.chat (verified callable on this plan).",
+    "context_length": 1000000,
+    "max_completion_tokens": 65536,
+    "supportedInputModalities": [
+      "text",
+      "image"
+    ],
+    "supportedOutputModalities": [
+      "text"
+    ]
+  },
+  {
+    "id": "gemini-3-flash-preview",
+    "object": "model",
+    "created": 1759276800,
+    "owned_by": "google",
+    "type": "floatboat",
+    "display_name": "gemini-3-flash-preview",
+    "description": "FloatBoat managed-account model routed via https://newapi.aoe.chat (verified callable on this plan).",
+    "context_length": 1000000,
+    "max_completion_tokens": 65536,
+    "supportedInputModalities": [
+      "text",
+      "image"
+    ],
+    "supportedOutputModalities": [
+      "text"
+    ]
+  },
+  {
+    "id": "gemini-3-pro-image-preview",
+    "object": "model",
+    "created": 1759276800,
+    "owned_by": "google",
+    "type": "floatboat",
+    "display_name": "gemini-3-pro-image-preview",
+    "description": "FloatBoat managed-account model routed via https://newapi.aoe.chat (verified callable on this plan).",
+    "context_length": 1000000,
+    "max_completion_tokens": 65536,
+    "supportedInputModalities": [
+      "text",
+      "image"
+    ],
+    "supportedOutputModalities": [
+      "text"
+    ]
+  },
+  {
+    "id": "gemini-3-pro-preview",
+    "object": "model",
+    "created": 1759276800,
+    "owned_by": "google",
+    "type": "floatboat",
+    "display_name": "gemini-3-pro-preview",
+    "description": "FloatBoat managed-account model routed via https://newapi.aoe.chat (verified callable on this plan).",
+    "context_length": 1000000,
+    "max_completion_tokens": 65536,
+    "supportedInputModalities": [
+      "text",
+      "image"
+    ],
+    "supportedOutputModalities": [
+      "text"
+    ]
+  },
+  {
+    "id": "gemini-3.1-flash-image-preview",
+    "object": "model",
+    "created": 1759276800,
+    "owned_by": "google",
+    "type": "floatboat",
+    "display_name": "gemini-3.1-flash-image-preview",
+    "description": "FloatBoat managed-account model routed via https://newapi.aoe.chat (verified callable on this plan).",
+    "context_length": 1000000,
+    "max_completion_tokens": 65536,
+    "supportedInputModalities": [
+      "text",
+      "image"
+    ],
+    "supportedOutputModalities": [
+      "text"
+    ]
+  },
+  {
+    "id": "gemini-3.1-pro",
+    "object": "model",
+    "created": 1759276800,
+    "owned_by": "google",
+    "type": "floatboat",
+    "display_name": "gemini-3.1-pro",
+    "description": "FloatBoat managed-account model routed via https://newapi.aoe.chat (verified callable on this plan).",
+    "context_length": 1000000,
+    "max_completion_tokens": 65536,
+    "supportedInputModalities": [
+      "text",
+      "image"
+    ],
+    "supportedOutputModalities": [
+      "text"
+    ]
+  },
+  {
+    "id": "gemini-3.1-pro-preview",
+    "object": "model",
+    "created": 1759276800,
+    "owned_by": "google",
+    "type": "floatboat",
+    "display_name": "gemini-3.1-pro-preview",
+    "description": "FloatBoat managed-account model routed via https://newapi.aoe.chat (verified callable on this plan).",
+    "context_length": 1000000,
+    "max_completion_tokens": 65536,
+    "supportedInputModalities": [
+      "text",
+      "image"
+    ],
+    "supportedOutputModalities": [
+      "text"
+    ]
+  },
+  {
+    "id": "gemini-3.5-flash",
+    "object": "model",
+    "created": 1759276800,
+    "owned_by": "google",
+    "type": "floatboat",
+    "display_name": "gemini-3.5-flash",
+    "description": "FloatBoat managed-account model routed via https://newapi.aoe.chat (verified callable on this plan).",
+    "context_length": 1000000,
+    "max_completion_tokens": 65536,
+    "supportedInputModalities": [
+      "text",
+      "image"
+    ],
+    "supportedOutputModalities": [
+      "text"
+    ]
+  },
+  {
+    "id": "gemini-3.7-flash",
+    "object": "model",
+    "created": 1759276800,
+    "owned_by": "google",
+    "type": "floatboat",
+    "display_name": "gemini-3.7-flash",
+    "description": "FloatBoat managed-account model routed via https://newapi.aoe.chat (verified callable on this plan).",
+    "context_length": 1000000,
+    "max_completion_tokens": 65536,
+    "supportedInputModalities": [
+      "text",
+      "image"
+    ],
+    "supportedOutputModalities": [
+      "text"
+    ]
+  },
+  {
+    "id": "gemini-3.8-flash",
+    "object": "model",
+    "created": 1759276800,
+    "owned_by": "google",
+    "type": "floatboat",
+    "display_name": "gemini-3.8-flash",
+    "description": "FloatBoat managed-account model routed via https://newapi.aoe.chat (verified callable on this plan).",
+    "context_length": 1000000,
+    "max_completion_tokens": 65536,
+    "supportedInputModalities": [
+      "text",
+      "image"
+    ],
+    "supportedOutputModalities": [
+      "text"
+    ]
+  },
+  {
+    "id": "glm-5-2",
+    "object": "model",
+    "created": 1759276800,
+    "owned_by": "zhipu",
+    "type": "floatboat",
+    "display_name": "glm-5-2",
+    "description": "FloatBoat managed-account model routed via https://newapi.aoe.chat (verified callable on this plan).",
+    "context_length": 200000,
+    "max_completion_tokens": 65536,
+    "supportedInputModalities": [
+      "text"
+    ],
+    "supportedOutputModalities": [
+      "text"
+    ]
+  },
+  {
+    "id": "glm-5.2",
+    "object": "model",
+    "created": 1759276800,
+    "owned_by": "zhipu",
+    "type": "floatboat",
+    "display_name": "glm-5.2",
+    "description": "FloatBoat managed-account model routed via https://newapi.aoe.chat (verified callable on this plan).",
+    "context_length": 200000,
+    "max_completion_tokens": 65536,
+    "supportedInputModalities": [
+      "text"
+    ],
+    "supportedOutputModalities": [
+      "text"
+    ]
+  },
+  {
+    "id": "gpt-5.4-mini",
+    "object": "model",
+    "created": 1759276800,
+    "owned_by": "openai",
+    "type": "floatboat",
+    "display_name": "gpt-5.4-mini",
+    "description": "FloatBoat managed-account model routed via https://newapi.aoe.chat (verified callable on this plan).",
+    "context_length": 400000,
+    "max_completion_tokens": 65536,
+    "supportedInputModalities": [
+      "text"
+    ],
+    "supportedOutputModalities": [
+      "text"
+    ]
+  },
+  {
+    "id": "gpt-5.5",
+    "object": "model",
+    "created": 1759276800,
+    "owned_by": "openai",
+    "type": "floatboat",
+    "display_name": "gpt-5.5",
+    "description": "FloatBoat managed-account model routed via https://newapi.aoe.chat (verified callable on this plan).",
+    "context_length": 400000,
+    "max_completion_tokens": 65536,
+    "supportedInputModalities": [
+      "text"
+    ],
+    "supportedOutputModalities": [
+      "text"
+    ]
+  },
+  {
+    "id": "gpt-5.6-luna",
+    "object": "model",
+    "created": 1759276800,
+    "owned_by": "openai",
+    "type": "floatboat",
+    "display_name": "gpt-5.6-luna",
+    "description": "FloatBoat managed-account model routed via https://newapi.aoe.chat (verified callable on this plan).",
+    "context_length": 400000,
+    "max_completion_tokens": 65536,
+    "supportedInputModalities": [
+      "text"
+    ],
+    "supportedOutputModalities": [
+      "text"
+    ]
+  },
+  {
+    "id": "gpt-5.6-sol",
+    "object": "model",
+    "created": 1759276800,
+    "owned_by": "openai",
+    "type": "floatboat",
+    "display_name": "gpt-5.6-sol",
+    "description": "FloatBoat managed-account model routed via https://newapi.aoe.chat (verified callable on this plan).",
+    "context_length": 400000,
+    "max_completion_tokens": 65536,
+    "supportedInputModalities": [
+      "text"
+    ],
+    "supportedOutputModalities": [
+      "text"
+    ]
+  },
+  {
+    "id": "gpt-5.6-terra",
+    "object": "model",
+    "created": 1759276800,
+    "owned_by": "openai",
+    "type": "floatboat",
+    "display_name": "gpt-5.6-terra",
+    "description": "FloatBoat managed-account model routed via https://newapi.aoe.chat (verified callable on this plan).",
+    "context_length": 400000,
+    "max_completion_tokens": 65536,
+    "supportedInputModalities": [
+      "text"
+    ],
+    "supportedOutputModalities": [
+      "text"
+    ]
+  },
+  {
+    "id": "gpt-6-luna",
+    "object": "model",
+    "created": 1759276800,
+    "owned_by": "openai",
+    "type": "floatboat",
+    "display_name": "gpt-6-luna",
+    "description": "FloatBoat managed-account model routed via https://newapi.aoe.chat (verified callable on this plan).",
+    "context_length": 400000,
+    "max_completion_tokens": 65536,
+    "supportedInputModalities": [
+      "text"
+    ],
+    "supportedOutputModalities": [
+      "text"
+    ]
+  },
+  {
+    "id": "gpt-6-sol",
+    "object": "model",
+    "created": 1759276800,
+    "owned_by": "openai",
+    "type": "floatboat",
+    "display_name": "gpt-6-sol",
+    "description": "FloatBoat managed-account model routed via https://newapi.aoe.chat (verified callable on this plan).",
+    "context_length": 400000,
+    "max_completion_tokens": 65536,
+    "supportedInputModalities": [
+      "text"
+    ],
+    "supportedOutputModalities": [
+      "text"
+    ]
+  },
+  {
+    "id": "kimi-k3",
+    "object": "model",
+    "created": 1759276800,
+    "owned_by": "moonshot",
+    "type": "floatboat",
+    "display_name": "kimi-k3",
+    "description": "FloatBoat managed-account model routed via https://newapi.aoe.chat (verified callable on this plan).",
+    "context_length": 256000,
+    "max_completion_tokens": 65536,
+    "supportedInputModalities": [
+      "text"
+    ],
+    "supportedOutputModalities": [
+      "text"
+    ]
+  }
  ]
 }

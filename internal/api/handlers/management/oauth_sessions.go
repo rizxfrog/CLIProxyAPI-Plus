@@ -382,6 +382,8 @@ func NormalizeOAuthProvider(provider string) (string, error) {
 		return "minimax", nil
 	case "minimax-cn", "minimaxi", "minimax.cn":
 		return "minimax-cn", nil
+	case "floatboat", "aoe", "aoe.chat", "agent-os":
+		return "floatboat", nil
 	default:
 		return "", errUnsupportedOAuthFlow
 	}

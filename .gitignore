@@ -98,3 +98,5 @@ __pycache__/
 /.codemap/config.json
 /.codemap/modules.json
 /CLAUDE.md
+/run.dev.sh
+.run/

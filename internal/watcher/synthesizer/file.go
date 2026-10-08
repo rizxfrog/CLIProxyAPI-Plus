@@ -11,6 +11,7 @@ import (
 
 	clineauth "github.com/router-for-me/CLIProxyAPI/v8/internal/auth/cline"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/auth/codex"
+	floatboatauth "github.com/router-for-me/CLIProxyAPI/v8/internal/auth/floatboat"
 	kimiauth "github.com/router-for-me/CLIProxyAPI/v8/internal/auth/kimi"
 	minimaxauth "github.com/router-for-me/CLIProxyAPI/v8/internal/auth/minimax"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
@@ -256,6 +257,24 @@ func synthesizeFileAuths(ctx *SynthesisContext, fullPath string, data []byte) ([
 		if strings.TrimSpace(a.Attributes["api_key"]) == "" {
 			if token, _ := metadata["access_token"].(string); strings.TrimSpace(token) != "" {
 				a.Attributes["api_key"] = strings.TrimSpace(token)
+			}
+		}
+	}
+	if provider == constant.Floatboat {
+		a.Attributes[coreauth.AttributeAuthKind] = coreauth.AuthKindOAuth
+		baseURL, _ := metadata["base_url"].(string)
+		baseURL = strings.TrimSpace(baseURL)
+		if baseURL == "" {
+			baseURL = floatboatauth.DefaultInferenceBaseURL
+		}
+		a.Attributes["base_url"] = baseURL
+		// The minted inference key authorizes the gateway; fall back to the
+		// account access token when it is absent.
+		if strings.TrimSpace(a.Attributes["api_key"]) == "" {
+			if key, _ := metadata["api_key"].(string); strings.TrimSpace(key) != "" {
+				a.Attributes["api_key"] = strings.TrimSpace(key)
+			} else if token, _ := metadata["access_token"].(string); strings.TrimSpace(token) != "" {
+				a.Attributes["access_token"] = strings.TrimSpace(token)
 			}
 		}
 	}

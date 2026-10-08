@@ -24,6 +24,7 @@ func init() {
 	registerRefreshLead("meta", func() Authenticator { return NewMetaAuthenticator() })
 	registerRefreshLead("trae", func() Authenticator { return NewTraeAuthenticator() })
 	registerRefreshLead("cline", func() Authenticator { return NewClineAuthenticator() })
+	registerRefreshLead("floatboat", func() Authenticator { return NewFloatboatAuthenticator() })
 
 	// Providers whose credential rotation lives in the runtime executor rather
 	// than an Authenticator (no sdk/auth type exists for them). Registering a

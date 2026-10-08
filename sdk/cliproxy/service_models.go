@@ -180,6 +180,9 @@ func (s *Service) registerModelsForAuthWithCache(ctx context.Context, a *coreaut
 	case constant.Minimax, constant.MinimaxCN:
 		models = registry.GetMinimaxModels()
 		models = applyExcludedModels(models, excluded)
+	case constant.Floatboat:
+		models = registry.GetFloatboatModels()
+		models = applyExcludedModels(models, excluded)
 	case "codebuddy-cn":
 		models = registry.GetCodeBuddyCNModels()
 		if entry := s.resolveConfigCodeBuddyCNKey(a); entry != nil {
@@ -424,12 +427,20 @@ func (s *Service) registerModelsForAuthWithCache(ctx context.Context, a *coreaut
 		if strings.EqualFold(strings.TrimSpace(a.Provider), "antigravity") {
 			s.asyncProbeAntigravityCapabilities(ctx, a, key)
 		}
+		if strings.EqualFold(strings.TrimSpace(a.Provider), constant.Floatboat) {
+			// The static catalogue is only a fallback: the gateway owns the real
+			// per-account list, so refresh it in the background.
+			s.asyncProbeFloatboatCatalogue(ctx, a, key)
+		}
 		return
 	}
 
 	GlobalModelRegistry().UnregisterClient(a.ID)
 	if provider == "antigravity" {
 		s.asyncProbeAntigravityCapabilities(ctx, a, key)
+	}
+	if provider == constant.Floatboat {
+		s.asyncProbeFloatboatCatalogue(ctx, a, key)
 	}
 }
 

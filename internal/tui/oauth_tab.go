@@ -36,6 +36,7 @@ var oauthProviders = []oauthProvider{
 	{"CodeArts (Huawei)", "codearts-auth-url", "🟥", false},
 	{"Meta", "meta-auth-url", "🔵", true},
 	{"Cline", "cline-auth-url", "🟢", false},
+	{"FloatBoat (aoe.chat)", "floatboat-auth-url", "⛵", false},
 }
 
 // oauthTabModel handles OAuth login flows.
@@ -389,6 +390,8 @@ func (m oauthTabModel) submitCallback(callbackURL string) tea.Cmd {
 					providerKey = "codearts"
 				case "meta-auth-url":
 					providerKey = "meta"
+				case "floatboat-auth-url":
+					providerKey = "floatboat"
 				}
 				break
 			}

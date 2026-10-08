@@ -203,6 +203,7 @@ func preserveLocalCatalogSections(parsed, old *staticModelsJSON) {
 		{old.QoderCN, &parsed.QoderCN},
 		{old.QoderAI, &parsed.QoderAI},
 		{old.Minimax, &parsed.Minimax},
+		{old.Floatboat, &parsed.Floatboat},
 	}
 	for _, section := range sections {
 		if len(*section.incoming) == 0 && len(section.local) > 0 {

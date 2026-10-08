@@ -45,6 +45,7 @@ type staticModelsJSON struct {
 	QoderAI     []*ModelInfo `json:"qoder-ai"`
 	Meta        []*ModelInfo `json:"meta"`
 	Minimax     []*ModelInfo `json:"minimax"`
+	Floatboat   []*ModelInfo `json:"floatboat"`
 }
 
 // GetClaudeModels returns the standard Claude model definitions.
@@ -95,6 +96,11 @@ func GetKimiModels() []*ModelInfo {
 // GetMinimaxModels returns the standard MiniMax Code managed-account model definitions.
 func GetMinimaxModels() []*ModelInfo {
 	return cloneModelInfos(getModels().Minimax)
+}
+
+// GetFloatboatModels returns the FloatBoat (aoe.chat) managed-account model definitions.
+func GetFloatboatModels() []*ModelInfo {
+	return cloneModelInfos(getModels().Floatboat)
 }
 
 // GetCodeBuddyCNModels returns the standard CodeBuddy CN (Tencent) model definitions.
@@ -1127,6 +1133,8 @@ func GetStaticModelDefinitionsByChannel(channel string) []*ModelInfo {
 		return GetCodeBuddyAIModels()
 	case constant.Minimax, constant.MinimaxCN:
 		return GetMinimaxModels()
+	case constant.Floatboat:
+		return GetFloatboatModels()
 	case "deepseek-web":
 		return GetDeepSeekWebModels()
 	case constant.Xiaohuanxiong:
@@ -1194,6 +1202,7 @@ func LookupStaticModelInfo(modelID string) *ModelInfo {
 		GetCodeArtsModels(),
 		data.Meta,
 		data.Minimax,
+		data.Floatboat,
 	}
 	for _, models := range allModels {
 		for _, m := range models {

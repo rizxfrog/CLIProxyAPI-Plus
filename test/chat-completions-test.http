@@ -1,6 +1,6 @@
 @Token = sk-test
 @BASE_URL = http://localhost:8317
-@MODEL_ID = qmodel_38max
+@MODEL_ID = fb/gpt-6-sol
 @QWEN_WEB_CHAT = qwen-web-chat
 @QWEN_WEB_IMAGE = qwen-web-image
 

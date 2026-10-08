@@ -78,4 +78,10 @@ const (
 	// and request envelope with Qoder CN; only the hosts and account system
 	// differ.
 	QoderAI = "qoder-ai"
+
+	// Floatboat represents the FloatBoat (aoe.chat "Agent OS") managed-account
+	// provider identifier. It logs in through the product web + aoe:// deep link
+	// against floatboat.ai and speaks Anthropic Messages to the managed gateway
+	// at newapi.aoe.chat.
+	Floatboat = "floatboat"
 )
