@@ -69,6 +69,10 @@ func (s *Server) registerManagementV8Routes() {
 	v8.GET("/oauth/auth-url", s.mgmt.StartOAuthV8)
 	v8.GET("/oauth/status", s.mgmt.GetAuthStatus)
 	v8.DELETE("/oauth/session", s.mgmt.CancelAuthSession)
+	v8.POST("/trae-auth-callback", s.mgmt.PostTraeAuthCallback)
+	v8.POST("/cline-auth-callback", s.mgmt.PostClineAuthCallback)
+	v8.POST("/xiaohuanxiong-auth-callback", s.mgmt.PostXiaohuanxiongAuthCallback)
+	v8.POST("/codearts-auth-callback", s.mgmt.PostCodeArtsAuthCallback)
 
 	v8.GET("/plugins", s.mgmt.ListPlugins)
 	v8.DELETE("/plugins/:id", s.mgmt.DeletePlugin)
