@@ -87,6 +87,42 @@ func TestManagementV8PreservesAntiBotProtection(t *testing.T) {
 	}
 }
 
+func TestManagementV8DispatchesBuiltInDeviceOAuthProviders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer proxy.Close()
+
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("port: 8317\nremote-management: {secret-key: test-password}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.ProxyURL = proxy.URL
+	h := management.NewHandler(cfg, path, nil)
+	h.SetLocalPassword("test-password")
+	s := &Server{cfg: cfg, engine: gin.New(), mgmt: h}
+	s.managementRoutesEnabled.Store(true)
+	s.registerManagementRoutes()
+
+	for _, provider := range []string{"codebuddy-cn", "codebuddy-ai", "minimax", "minimax-cn"} {
+		t.Run(provider, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/v8/management/oauth/auth-url?provider="+provider, nil)
+			req.RemoteAddr = "127.0.0.1:1234"
+			req.Header.Set("Authorization", "Bearer test-password")
+			resp := httptest.NewRecorder()
+			s.engine.ServeHTTP(resp, req)
+			if resp.Code != http.StatusInternalServerError || strings.Contains(resp.Body.String(), "provider_not_found") {
+				t.Fatalf("provider %q was not dispatched: status=%d body=%s", provider, resp.Code, resp.Body.String())
+			}
+		})
+	}
+}
+
 func TestManagementV8IndependentContract(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	raw := "port: 8317\nrequest-retry: 3\ndebug: false\napi-keys: [client]\nremote-management: {secret-key: test-password}\n"
@@ -116,6 +152,8 @@ func TestManagementV8IndependentContract(t *testing.T) {
 		"GET /v8/management/observability/logs", "GET /v8/management/observability/usage/queue",
 		"GET /v8/management/credentials", "POST /v8/management/credentials",
 		"GET /v8/management/oauth/auth-url", "POST /v8/management/oauth/import", "POST /v8/management/oauth/callback",
+		"POST /v8/management/trae-auth-callback", "POST /v8/management/cline-auth-callback",
+		"POST /v8/management/xiaohuanxiong-auth-callback", "POST /v8/management/codearts-auth-callback",
 		"POST /v8/management/routing/cooldown/reset",
 		"GET /v8/management/floatboat-quota",
 		"GET /v8/management/codearts-quota", "GET /v8/management/qoder-cn-quota",

@@ -22,8 +22,28 @@ func (h *Handler) StartOAuthV8(c *gin.Context) {
 		h.RequestKimiToken(c)
 	case "kimi-ai":
 		h.RequestKimiAIToken(c)
+	case "codebuddy-cn":
+		h.RequestCodeBuddyCNToken(c)
+	case "codebuddy-ai":
+		h.RequestCodeBuddyAIToken(c)
+	case "minimax":
+		h.RequestMinimaxToken(c)
+	case "minimax-cn":
+		h.RequestMinimaxCNToken(c)
+	case "qoder-cn":
+		h.RequestQoderCNToken(c)
+	case "qoder-ai":
+		h.RequestQoderAIToken(c)
 	case "xai":
 		h.RequestXAIToken(c)
+	case "trae":
+		h.RequestTraeToken(c)
+	case "cline":
+		h.RequestClineToken(c)
+	case "xiaohuanxiong":
+		h.RequestXiaohuanxiongToken(c)
+	case "codearts":
+		h.RequestCodeArtsToken(c)
 	case "devin":
 		h.RequestDevinToken(c)
 	case "meta":
