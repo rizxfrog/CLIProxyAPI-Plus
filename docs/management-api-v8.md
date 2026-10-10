@@ -109,6 +109,12 @@ retain the corresponding business operation's fields.
 | `/oauth/status?state=<state>` | GET | Get login status. |
 | `/oauth/session?state=<state>` | DELETE | Cancel a login session. |
 | `/oauth/callback` | GET, POST | Submit an OAuth callback. |
+| `/trae-auth-callback` | POST | Submit a pasted TRAE callback URL. |
+| `/cline-auth-callback` | POST | Submit a pasted Cline callback URL or code. |
+| `/xiaohuanxiong-auth-callback` | POST | Submit a pasted Xiaohuanxiong callback URL or code. |
+| `/codearts-auth-callback` | POST | Submit a pasted CodeArts callback URL or code. |
+| `/floatboat-auth-callback` | POST | Submit a pasted FloatBoat callback URL. |
+| `/web-login/qwen-web` | POST | Acquire and store a Qwen Web browser session. |
 | `/plugins` | GET | List installed plugins. |
 | `/plugins/<id>` | DELETE | Delete a plugin. |
 | `/plugins/store` | GET | List the plugin store. |
@@ -118,8 +124,10 @@ retain the corresponding business operation's fields.
 ## OAuth
 
 The login URL is shared by all providers. Set the required `provider` query
-parameter to `claude`, `codex`, `antigravity`, `kimi`, `kimi-ai`, `xai`, `devin`,
-`meta`, or a registered plugin provider ID. For example:
+parameter to `claude`, `codex`, `antigravity`, `kimi`, `kimi-ai`,
+`codebuddy-cn`, `codebuddy-ai`, `minimax`, `minimax-cn`, `qoder-cn`,
+`qoder-ai`, `xai`, `trae`, `cline`, `xiaohuanxiong`, `codearts`, `devin`,
+`meta`, `floatboat`, or a registered plugin provider ID. For example:
 
 ```http
 GET /v8/management/oauth/auth-url?provider=codex
@@ -136,6 +144,17 @@ callback URL. If `provider` is omitted, it is inferred from the pending state;
 an explicit provider must match that state. Poll until the status is `ok` or
 `error`; `wait` means the login is still pending. Callback acceptance alone does
 not mean credential exchange and persistence have completed.
+
+Providers whose callback lands on a loopback URL or a desktop-app deep link that
+the proxy cannot receive use a dedicated `POST /<provider>-auth-callback` with a
+`state` field plus either `redirect_url` or `code`:
+`trae`, `cline`, `xiaohuanxiong`, `codearts`, and `floatboat`. These endpoints
+parse the provider's own callback shape and bind the pasted value to the pending
+session server-side, so callers that hold a bare code or a provider-specific URL
+do not need the shared `/oauth/callback` fields.
+
+Qwen Web has no OAuth flow. `POST /web-login/qwen-web` acquires and stores a
+browser session from a pasted cookie, account password, or session token.
 
 Import uses `POST /v8/management/oauth/import?provider=vertex`. The `provider`
 query parameter is required; Vertex is currently the supported import provider.

@@ -69,10 +69,18 @@ func (s *Server) registerManagementV8Routes() {
 	v8.GET("/oauth/auth-url", s.mgmt.StartOAuthV8)
 	v8.GET("/oauth/status", s.mgmt.GetAuthStatus)
 	v8.DELETE("/oauth/session", s.mgmt.CancelAuthSession)
+	// Providers that paste a loopback or deep-link callback back to the proxy need
+	// their dedicated callback endpoint here, not only under v0: the panel
+	// addresses the v8 contract exclusively.
 	v8.POST("/trae-auth-callback", s.mgmt.PostTraeAuthCallback)
 	v8.POST("/cline-auth-callback", s.mgmt.PostClineAuthCallback)
 	v8.POST("/xiaohuanxiong-auth-callback", s.mgmt.PostXiaohuanxiongAuthCallback)
 	v8.POST("/codearts-auth-callback", s.mgmt.PostCodeArtsAuthCallback)
+	v8.POST("/floatboat-auth-callback", s.mgmt.PostFloatboatAuthCallback)
+
+	// Web-session login persists a credential like any other acquisition flow, so
+	// it belongs to the same authenticated v8 surface the panel calls.
+	v8.POST("/web-login/qwen-web", s.mgmt.LoginQwenWeb)
 
 	v8.GET("/plugins", s.mgmt.ListPlugins)
 	v8.DELETE("/plugins/:id", s.mgmt.DeletePlugin)

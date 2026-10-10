@@ -87,8 +87,14 @@ func TestManagementV8PreservesAntiBotProtection(t *testing.T) {
 	}
 }
 
-func TestManagementV8DispatchesBuiltInDeviceOAuthProviders(t *testing.T) {
+// TestManagementV8DispatchesBuiltInOAuthProviders pins the v8 provider switch to
+// each provider's own flow. Providers are distinguished by the login response
+// they produce, so a case wired to the wrong handler fails here: the panel would
+// otherwise send the user to the wrong product's login page.
+func TestManagementV8DispatchesBuiltInOAuthProviders(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	// Device-flow providers reach their upstream from this request, so point the
+	// proxy at a closed server: they fail fast instead of touching the network.
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
 	}))
@@ -103,21 +109,125 @@ func TestManagementV8DispatchesBuiltInDeviceOAuthProviders(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg.ProxyURL = proxy.URL
+	cfg.AuthDir = t.TempDir()
 	h := management.NewHandler(cfg, path, nil)
 	h.SetLocalPassword("test-password")
 	s := &Server{cfg: cfg, engine: gin.New(), mgmt: h}
 	s.managementRoutesEnabled.Store(true)
 	s.registerManagementRoutes()
 
-	for _, provider := range []string{"codebuddy-cn", "codebuddy-ai", "minimax", "minimax-cn"} {
-		t.Run(provider, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/v8/management/oauth/auth-url?provider="+provider, nil)
+	for _, tc := range []struct {
+		provider string
+		// flow and urlHint describe the login the provider must start.
+		flow    string
+		urlHint string
+		// errorHint identifies the provider when the flow cannot reach upstream.
+		errorHint string
+	}{
+		{provider: "codebuddy-cn", errorHint: "failed to start CodeBuddy CN authorization"},
+		{provider: "codebuddy-ai", errorHint: "failed to start CodeBuddy AI authorization"},
+		{provider: "minimax", errorHint: "failed to start MiniMax Code (International) authorization"},
+		{provider: "minimax-cn", errorHint: "failed to start MiniMax Code (China) authorization"},
+		{provider: "qoder-cn", flow: "device", urlHint: "//qoder.cn/"},
+		{provider: "qoder-ai", flow: "device", urlHint: "//qoder.com/"},
+		{provider: "trae", flow: "manual", urlHint: "//www.trae.cn/"},
+		{provider: "cline", flow: "manual", urlHint: "//api.cline.bot/"},
+		{provider: "xiaohuanxiong", flow: "callback", urlHint: "//xiaohuanxiong.com/"},
+		{provider: "codearts", flow: "callback", urlHint: "//codearts.huaweicloud.com/"},
+		{provider: "floatboat", flow: "manual", urlHint: "//floatboat.ai/"},
+	} {
+		t.Run(tc.provider, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/v8/management/oauth/auth-url?provider="+tc.provider, nil)
 			req.RemoteAddr = "127.0.0.1:1234"
 			req.Header.Set("Authorization", "Bearer test-password")
 			resp := httptest.NewRecorder()
 			s.engine.ServeHTTP(resp, req)
-			if resp.Code != http.StatusInternalServerError || strings.Contains(resp.Body.String(), "provider_not_found") {
-				t.Fatalf("provider %q was not dispatched: status=%d body=%s", provider, resp.Code, resp.Body.String())
+			body := resp.Body.String()
+			if resp.Code == http.StatusNotFound || strings.Contains(body, "provider_not_found") {
+				t.Fatalf("provider %q was not dispatched: status=%d body=%s", tc.provider, resp.Code, body)
+			}
+
+			if tc.errorHint != "" {
+				if resp.Code != http.StatusInternalServerError || !strings.Contains(body, tc.errorHint) {
+					t.Fatalf("provider %q ran the wrong flow: status=%d body=%s", tc.provider, resp.Code, body)
+				}
+				return
+			}
+
+			var login struct {
+				URL   string `json:"url"`
+				State string `json:"state"`
+				Flow  string `json:"flow"`
+			}
+			if errDecode := json.Unmarshal(resp.Body.Bytes(), &login); errDecode != nil {
+				t.Fatalf("provider %q returned an invalid login response: %s", tc.provider, body)
+			}
+			t.Cleanup(func() { management.CancelOAuthSession(login.State) })
+			if resp.Code != http.StatusOK || login.Flow != tc.flow || !strings.Contains(login.URL, tc.urlHint) {
+				t.Fatalf("provider %q ran the wrong flow: status=%d flow=%q url=%q", tc.provider, resp.Code, login.Flow, login.URL)
+			}
+			if !management.IsOAuthSessionPending(login.State, tc.provider) {
+				t.Fatalf("provider %q did not register its session", tc.provider)
+			}
+		})
+	}
+}
+
+// TestManagementV8ServesProviderCallbackAndWebLoginRoutes pins which handler each
+// v8 entry point is bound to. The panel addresses the v8 contract exclusively, so
+// a provider callback or web-session login reachable only under v0 is a broken
+// login flow; a route wired to another provider's handler is worse, because it
+// silently completes the wrong product's login.
+func TestManagementV8ServesProviderCallbackAndWebLoginRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	// Each subtest builds its own handler: the management key authenticator bans an
+	// IP after a few failures, so sharing one handler across subtests would make
+	// the later assertions depend on the earlier ones.
+	newServer := func(t *testing.T) (*Server, map[string]string) {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		if err := os.WriteFile(path, []byte("port: 8317\nremote-management: {secret-key: test-password}\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := config.LoadConfig(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg.AuthDir = t.TempDir()
+		h := management.NewHandler(cfg, path, nil)
+		h.SetLocalPassword("test-password")
+		s := &Server{cfg: cfg, engine: gin.New(), mgmt: h}
+		s.managementRoutesEnabled.Store(true)
+		s.registerManagementRoutes()
+		handlers := make(map[string]string)
+		for _, route := range s.engine.Routes() {
+			handlers[route.Method+" "+route.Path] = route.Handler
+		}
+		return s, handlers
+	}
+
+	for _, tc := range []struct{ path, handler string }{
+		{"/v8/management/trae-auth-callback", "PostTraeAuthCallback"},
+		{"/v8/management/cline-auth-callback", "PostClineAuthCallback"},
+		{"/v8/management/xiaohuanxiong-auth-callback", "PostXiaohuanxiongAuthCallback"},
+		{"/v8/management/codearts-auth-callback", "PostCodeArtsAuthCallback"},
+		{"/v8/management/floatboat-auth-callback", "PostFloatboatAuthCallback"},
+		{"/v8/management/web-login/qwen-web", "LoginQwenWeb"},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			s, handlers := newServer(t)
+			if bound := handlers["POST "+tc.path]; !strings.HasSuffix(bound, "(*Handler)."+tc.handler+"-fm") {
+				t.Fatalf("POST %s is bound to %q, want %s", tc.path, bound, tc.handler)
+			}
+			// These endpoints complete a login, so they must stay behind the
+			// management key like every other v8 credential write.
+			req := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(`{}`))
+			req.RemoteAddr = "127.0.0.1:1234"
+			resp := httptest.NewRecorder()
+			s.engine.ServeHTTP(resp, req)
+			if resp.Code != http.StatusUnauthorized {
+				t.Fatalf("POST %s without key: status=%d body=%s", tc.path, resp.Code, resp.Body.String())
 			}
 		})
 	}
@@ -154,6 +264,7 @@ func TestManagementV8IndependentContract(t *testing.T) {
 		"GET /v8/management/oauth/auth-url", "POST /v8/management/oauth/import", "POST /v8/management/oauth/callback",
 		"POST /v8/management/trae-auth-callback", "POST /v8/management/cline-auth-callback",
 		"POST /v8/management/xiaohuanxiong-auth-callback", "POST /v8/management/codearts-auth-callback",
+		"POST /v8/management/floatboat-auth-callback", "POST /v8/management/web-login/qwen-web",
 		"POST /v8/management/routing/cooldown/reset",
 		"GET /v8/management/floatboat-quota",
 		"GET /v8/management/codearts-quota", "GET /v8/management/qoder-cn-quota",
