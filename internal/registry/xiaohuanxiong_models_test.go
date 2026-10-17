@@ -29,6 +29,28 @@ func TestGetXiaohuanxiongModelsLoadsEmbeddedCatalog(t *testing.T) {
 			t.Fatalf("catalog is missing %q", want)
 		}
 	}
+	current := ids["sn-deepseek-v4-1-flash"]
+	if current == nil || current.DisplayName != "DeepSeek V4.1 Flash" {
+		t.Fatalf("current DeepSeek model missing or mislabeled: %+v", current)
+	}
+	if current.ContextLength != 1000000 || current.MaxCompletionTokens != 100000 {
+		t.Fatalf("current DeepSeek model limits do not match upstream: %+v", current)
+	}
+	if ids["deepseek-v4-pro-0813"] != nil {
+		t.Fatal("retired DeepSeek V4 Pro remains in the Xiaohuanxiong catalog")
+	}
+}
+
+func TestCodeBuddyCNIncludesStep5Preview(t *testing.T) {
+	for _, model := range GetCodeBuddyCNModels() {
+		if model != nil && model.ID == "step-5-preview" {
+			if model.DisplayName != "Step-5-Preview" {
+				t.Fatalf("Step-5 display name = %q", model.DisplayName)
+			}
+			return
+		}
+	}
+	t.Fatal("WorkBuddy model step-5-preview is absent")
 }
 
 // TestXiaohuanxiongCatalogThinkingMetadata guards the capability data that drives

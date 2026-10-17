@@ -4950,8 +4950,8 @@
       "created": 1761148800,
       "owned_by": "tencent",
       "type": "codebuddy-cn",
-      "display_name": "step-5-preview",
-      "description": "step-5-preview via CodeBuddy CN",
+      "display_name": "Step-5-Preview",
+      "description": "Step-5-Preview via CodeBuddy CN (WorkBuddy)",
       "context_length": 1000000,
       "max_completion_tokens": 64000,
       "thinking": {

@@ -101,15 +101,15 @@
       ]
     },
     {
-      "id": "deepseek-v4-pro-0813",
+      "id": "sn-deepseek-v4-1-flash",
       "object": "model",
       "created": 1752192000,
       "owned_by": "sensetime",
       "type": "xiaohuanxiong",
-      "display_name": "DeepSeek V4 Pro 0813",
-      "description": "DeepSeek V4 Pro (0813) via the Xiaohuanxiong gateway. Deep thinking maps to extra_body.thinking.type (enabled/disabled).",
-      "context_length": 163840,
-      "max_completion_tokens": 65536,
+      "display_name": "DeepSeek V4.1 Flash",
+      "description": "DeepSeek V4.1 Flash via the Xiaohuanxiong gateway. Deep thinking maps to extra_body.thinking.type (enabled/disabled).",
+      "context_length": 1000000,
+      "max_completion_tokens": 100000,
       "thinking": {
         "zero_allowed": true,
         "levels": [

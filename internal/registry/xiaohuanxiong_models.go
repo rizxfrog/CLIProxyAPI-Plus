@@ -105,6 +105,12 @@ var staticXiaohuanxiongModels = []*ModelInfo{
 		Thinking: &ThinkingSupport{ZeroAllowed: true, Levels: []string{"low", "high"}},
 	},
 	{
+		ID: "sn-deepseek-v4-1-flash", Object: "model", OwnedBy: "sensetime",
+		Type: "xiaohuanxiong", DisplayName: "DeepSeek V4.1 Flash",
+		ContextLength: 1000000, MaxCompletionTokens: 100000,
+		Thinking: &ThinkingSupport{ZeroAllowed: true, Levels: []string{"low", "high"}},
+	},
+	{
 		ID: "sn-sensenova-6-8-flash-lite", Object: "model", OwnedBy: "sensetime",
 		Type: "xiaohuanxiong", DisplayName: "SenseNova 6.8 Flash Lite",
 		ContextLength: 131072, MaxCompletionTokens: 65536,
