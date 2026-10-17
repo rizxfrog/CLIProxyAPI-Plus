@@ -273,6 +273,7 @@ func TestManagementV8IndependentContract(t *testing.T) {
 		"POST /v8/management/lobsterai-server-auth-callback",
 		"POST /v8/management/routing/cooldown/reset",
 		"GET /v8/management/floatboat-quota",
+		"GET /v8/management/xiaohuanxiong-quota",
 		"GET /v8/management/lobsterai-server-quota",
 		"GET /v8/management/codearts-quota", "GET /v8/management/qoder-cn-quota",
 		"GET /v8/management/qoder-ai-quota", "GET /v8/management/minimax-quota",

@@ -47,6 +47,7 @@ func (s *Server) registerManagementV8Routes() {
 	// Per-provider quota reads. Same reasoning as above: the v8 contract serves
 	// the panel, so each provider route is registered here as well as under v0.
 	v8.GET("/floatboat-quota", s.mgmt.GetFloatboatQuota)
+	v8.GET("/xiaohuanxiong-quota", s.mgmt.GetXiaohuanxiongQuota)
 	v8.GET("/lobsterai-server-quota", s.mgmt.GetLobsteraiServerQuota)
 	v8.GET("/codearts-quota", s.mgmt.GetCodeArtsQuota)
 	v8.GET("/qoder-cn-quota", s.mgmt.GetQoderCNQuota)

@@ -31,6 +31,7 @@ import (
 
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
+	log "github.com/sirupsen/logrus"
 )
 
 const (
@@ -44,6 +45,8 @@ const (
 	AuthorizePath = "/code/authorize"
 	// AuthAPIPrefix is the web authentication API prefix.
 	AuthAPIPrefix = "/api/web/auth/v1"
+	// PointsBalancePath is the account balance read used by the web client.
+	PointsBalancePath = "/api/web/points/v1/balance"
 	// LLMPath is the OpenAI-compatible LLM gateway base path.
 	LLMPath = "/api/web/llm/v2"
 	// LLMBaseURL is the OpenAI-compatible gateway used for inference.
@@ -107,6 +110,18 @@ type TokenData struct {
 	OfficeOrgName string
 	// OfficeOrgRole is the optional organization role.
 	OfficeOrgRole string
+}
+
+// PointsBalance is the current account balance and its source buckets.
+// Values are points, not tokens or a model-specific usage window.
+type PointsBalance struct {
+	AvailablePoints       int64 `json:"available_points"`
+	DailyPoints           int64 `json:"daily_points"`
+	MonthlyPoints         int64 `json:"monthly_points"`
+	RewardPoints          int64 `json:"reward_points"`
+	TopupPoints           int64 `json:"topup_points"`
+	EnterpriseTopupPoints int64 `json:"enterprise_topup_points"`
+	TotalChargeablePoints int64 `json:"total_chargeable_points"`
 }
 
 // Client performs Xiaohuanxiong credential requests.
@@ -405,6 +420,61 @@ func (c *Client) FetchModelCatalog(ctx context.Context, accessToken string) ([]b
 		return nil, &Error{StatusCode: resp.StatusCode, Message: strings.TrimSpace(string(data))}
 	}
 	return data, nil
+}
+
+// FetchPointsBalance reads the same balance endpoint as the Xiaohuanxiong web client.
+func (c *Client) FetchPointsBalance(ctx context.Context, accessToken string) (*PointsBalance, error) {
+	accessToken = strings.TrimSpace(accessToken)
+	if accessToken == "" {
+		return nil, fmt.Errorf("xiaohuanxiong: access token is empty")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	req, errReq := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL()+PointsBalancePath, nil)
+	if errReq != nil {
+		return nil, fmt.Errorf("xiaohuanxiong: create balance request: %w", errReq)
+	}
+	applyHeaders(req, accessToken)
+	// The client timeout is for credential acquisition. An established account
+	// balance read follows the request context instead of a second fixed timer.
+	httpClient := *c.httpClient
+	httpClient.Timeout = 0
+	resp, errDo := httpClient.Do(req)
+	if errDo != nil {
+		return nil, fmt.Errorf("xiaohuanxiong: balance request failed: %w", errDo)
+	}
+	defer func() {
+		if errClose := resp.Body.Close(); errClose != nil {
+			log.Debugf("xiaohuanxiong: close balance response: %v", errClose)
+		}
+	}()
+	data, errRead := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if errRead != nil {
+		return nil, fmt.Errorf("xiaohuanxiong: read balance response: %w", errRead)
+	}
+	var envelope apiEnvelope
+	if errJSON := json.Unmarshal(data, &envelope); errJSON != nil {
+		if resp.StatusCode >= 400 {
+			return nil, &Error{StatusCode: resp.StatusCode, Message: strings.TrimSpace(string(data))}
+		}
+		return nil, fmt.Errorf("xiaohuanxiong: invalid balance response (HTTP %d)", resp.StatusCode)
+	}
+	if resp.StatusCode != http.StatusOK || envelope.Code != 0 {
+		return nil, &Error{StatusCode: resp.StatusCode, Code: envelope.Code, Message: envelope.Message}
+	}
+	if len(envelope.Data) == 0 || string(envelope.Data) == "null" {
+		return nil, fmt.Errorf("xiaohuanxiong: balance response has no data")
+	}
+	var fields map[string]json.RawMessage
+	if errJSON := json.Unmarshal(envelope.Data, &fields); errJSON != nil || fields["available_points"] == nil {
+		return nil, fmt.Errorf("xiaohuanxiong: balance response has no available_points")
+	}
+	var balance PointsBalance
+	if errJSON := json.Unmarshal(envelope.Data, &balance); errJSON != nil {
+		return nil, fmt.Errorf("xiaohuanxiong: invalid balance data: %w", errJSON)
+	}
+	return &balance, nil
 }
 
 // postJSON performs a JSON POST and unwraps the shared response envelope.

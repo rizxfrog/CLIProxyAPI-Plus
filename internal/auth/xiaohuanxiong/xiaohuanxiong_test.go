@@ -215,6 +215,46 @@ func TestFetchModelCatalogRejectsEmptyToken(t *testing.T) {
 	}
 }
 
+func TestFetchPointsBalance(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != PointsBalancePath {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+			t.Errorf("authorization = %q", got)
+		}
+		_, _ = w.Write([]byte(`{"code":0,"data":{"available_points":120,"daily_points":30,"monthly_points":90,"reward_points":0,"topup_points":0,"enterprise_topup_points":0,"total_chargeable_points":120}}`))
+	}))
+	defer server.Close()
+	balance, err := NewClientWithBaseURL(nil, "", server.URL).FetchPointsBalance(context.Background(), "test-token")
+	if err != nil || balance.AvailablePoints != 120 || balance.DailyPoints != 30 {
+		t.Fatalf("balance = %+v, err = %v", balance, err)
+	}
+}
+
+func TestFetchPointsBalanceRejectsMissingAmount(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"code":0,"data":{}}`))
+	}))
+	defer server.Close()
+	if _, err := NewClientWithBaseURL(nil, "", server.URL).FetchPointsBalance(context.Background(), "token"); err == nil {
+		t.Fatal("expected missing amount to fail")
+	}
+}
+
+func TestFetchPointsBalancePreservesUnauthorized(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"code":401,"message":"expired"}`))
+	}))
+	defer server.Close()
+	_, err := NewClientWithBaseURL(nil, "", server.URL).FetchPointsBalance(context.Background(), "token")
+	apiErr, ok := err.(*Error)
+	if !ok || apiErr.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 // TestJWTExpiryAndStorageExpiry covers JWT-based expiry detection.
 func TestJWTExpiryAndStorageExpiry(t *testing.T) {
 	exp := time.Now().Add(time.Hour).Unix()
