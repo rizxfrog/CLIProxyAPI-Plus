@@ -4,9 +4,40 @@ import (
 	"testing"
 	"time"
 
+	xiaohuanxiongauth "github.com/router-for-me/CLIProxyAPI/v8/internal/auth/xiaohuanxiong"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/constant"
+	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 )
+
+func TestFileSynthesizerXiaohuanxiongOAuthCredentials(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		baseURL string
+		wantURL string
+	}{
+		{name: "default", wantURL: xiaohuanxiongauth.LLMBaseURL},
+		{name: "override", baseURL: "https://gateway.example/api/web/llm/v2", wantURL: "https://gateway.example/api/web/llm/v2"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := `{"type":"xiaohuanxiong","access_token":"oauth-token","base_url":"` + tc.baseURL + `"}`
+			auths, err := SynthesizeAuthFile(&SynthesisContext{Config: &config.Config{}, Now: time.Unix(1, 0)}, "xiaohuanxiong.json", []byte(raw))
+			if err != nil || len(auths) != 1 {
+				t.Fatalf("SynthesizeAuthFile() = %d auths, %v", len(auths), err)
+			}
+			auth := auths[0]
+			if got := auth.Attributes["base_url"]; got != tc.wantURL {
+				t.Fatalf("base_url = %q, want %q", got, tc.wantURL)
+			}
+			if got := auth.Attributes["api_key"]; got != "oauth-token" {
+				t.Fatalf("api_key = %q", got)
+			}
+			if got := auth.Attributes[coreauth.AttributeAuthKind]; got != coreauth.AuthKindOAuth {
+				t.Fatalf("auth_kind = %q", got)
+			}
+		})
+	}
+}
 
 // TestConfigSynthesizerXiaohuanxiongKey verifies the auth record the executor
 // depends on: provider key, default gateway URL, and a bearer api_key.

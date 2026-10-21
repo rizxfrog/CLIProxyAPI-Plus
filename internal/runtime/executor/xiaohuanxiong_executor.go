@@ -44,6 +44,17 @@ func NewXiaohuanxiongExecutor(cfg *config.Config) *XiaohuanxiongExecutor {
 // Identifier returns the executor identifier.
 func (e *XiaohuanxiongExecutor) Identifier() string { return constant.Xiaohuanxiong }
 
+// Execute applies the OAuth metadata fallback before the compatibility executor
+// resolves its base URL and bearer token.
+func (e *XiaohuanxiongExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
+	return e.OpenAICompatExecutor.Execute(ctx, prepareXiaohuanxiongAuth(auth), req, opts)
+}
+
+// ExecuteStream applies the same credential fallback to streaming requests.
+func (e *XiaohuanxiongExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (*cliproxyexecutor.StreamResult, error) {
+	return e.OpenAICompatExecutor.ExecuteStream(ctx, prepareXiaohuanxiongAuth(auth), req, opts)
+}
+
 // PrepareRequest injects Xiaohuanxiong credentials into an ad-hoc request.
 func (e *XiaohuanxiongExecutor) PrepareRequest(req *http.Request, auth *cliproxyauth.Auth) error {
 	return e.OpenAICompatExecutor.PrepareRequest(req, prepareXiaohuanxiongAuth(auth))

@@ -16,6 +16,7 @@ import (
 	lobsteraiserverauth "github.com/router-for-me/CLIProxyAPI/v8/internal/auth/lobsteraiserver"
 	loomyauth "github.com/router-for-me/CLIProxyAPI/v8/internal/auth/loomy"
 	minimaxauth "github.com/router-for-me/CLIProxyAPI/v8/internal/auth/minimax"
+	xiaohuanxiongauth "github.com/router-for-me/CLIProxyAPI/v8/internal/auth/xiaohuanxiong"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/constant"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
@@ -236,6 +237,18 @@ func synthesizeFileAuths(ctx *SynthesisContext, fullPath string, data []byte) ([
 			}
 		}
 		a.Attributes["base_url"] = baseURL
+	}
+	if provider == constant.Xiaohuanxiong {
+		a.Attributes[coreauth.AttributeAuthKind] = coreauth.AuthKindOAuth
+		baseURL, _ := metadata["base_url"].(string)
+		baseURL = strings.TrimSpace(baseURL)
+		if baseURL == "" {
+			baseURL = xiaohuanxiongauth.LLMBaseURL
+		}
+		a.Attributes["base_url"] = baseURL
+		if token, _ := metadata["access_token"].(string); strings.TrimSpace(token) != "" {
+			a.Attributes["api_key"] = strings.TrimSpace(token)
+		}
 	}
 	if provider == constant.Minimax || provider == constant.MinimaxCN {
 		a.Attributes[coreauth.AttributeAuthKind] = coreauth.AuthKindOAuth
