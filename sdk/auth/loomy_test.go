@@ -66,3 +66,20 @@ func TestLoomySessionRecordCarriesDerivedExpiry(t *testing.T) {
 		t.Fatalf("attributes = %+v", record.Attributes)
 	}
 }
+
+func TestLoomySessionRecordUsesPrefixWhenForced(t *testing.T) {
+	token := &loomyauth.TokenData{Session: "abc123", UserID: "100000000000000001"}
+	cfg := &config.Config{}
+	cfg.ForceModelPrefix = true
+	record := LoomySessionRecord(cfg, token, "")
+	if record.Prefix != constant.Loomy || record.Metadata["prefix"] != constant.Loomy {
+		t.Fatalf("forced prefix was not persisted: prefix=%q metadata=%v", record.Prefix, record.Metadata["prefix"])
+	}
+	plain := LoomySessionRecord(&config.Config{}, token, "")
+	if plain.Prefix != "" {
+		t.Fatalf("unexpected prefix without forced mode: %q", plain.Prefix)
+	}
+	if _, exists := plain.Metadata["prefix"]; exists {
+		t.Fatal("unexpected persisted prefix without forced mode")
+	}
+}

@@ -234,6 +234,25 @@ func TestFetchModelsKeepsChatEntriesOnly(t *testing.T) {
 	}
 }
 
+func TestFetchModelsAcceptsCurrentOpenAIList(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/models" || r.Header.Get("token") != "session" || r.Header.Get("Authorization") != "" {
+			t.Errorf("unexpected model request path or headers")
+		}
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"DeepSeek-V4.1-Flash","type":"chat","name":"DeepSeek V4.1 Flash","context_length":1048576},{"id":"image-gen","type":"image"}]}`))
+	}))
+	defer server.Close()
+
+	client := NewClientWithBaseURLs(nil, "", server.URL, server.URL)
+	models, err := client.FetchModels(context.Background(), "session")
+	if err != nil {
+		t.Fatalf("FetchModels failed: %v", err)
+	}
+	if len(models) != 1 || models[0].ID != "DeepSeek-V4.1-Flash" {
+		t.Fatalf("unexpected models: %+v", models)
+	}
+}
+
 // TestFetchCreditDetailReportsUnknownQuotaSeparately verifies that a read-only
 // points response without dailyQuota is reported as unknown, not zero.
 func TestFetchCreditDetailReportsUnknownQuotaSeparately(t *testing.T) {
