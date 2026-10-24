@@ -26,6 +26,7 @@ func init() {
 	registerRefreshLead("cline", func() Authenticator { return NewClineAuthenticator() })
 	registerRefreshLead("floatboat", func() Authenticator { return NewFloatboatAuthenticator() })
 	registerRefreshLead("lobsterai-server", func() Authenticator { return NewLobsteraiServerAuthenticator() })
+	registerRefreshLead("airjelly", func() Authenticator { return NewAirJellyAuthenticator() })
 
 	// Providers whose credential rotation lives in the runtime executor rather
 	// than an Authenticator (no sdk/auth type exists for them). Registering a

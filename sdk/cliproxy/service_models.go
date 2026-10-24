@@ -199,6 +199,8 @@ func (s *Service) registerModelsForAuthWithConfigAndCache(ctx context.Context, c
 		// fallback list published until (or unless) the probe succeeds.
 		models = registry.GetLoomyModels()
 		models = applyExcludedModels(models, excluded)
+	case constant.AirJelly:
+		models = applyExcludedModels(registry.GetAirJellyModels(), excluded)
 	case "codebuddy-cn":
 		models = registry.GetCodeBuddyCNModels()
 		if entry := s.resolveConfigCodeBuddyCNKey(a); entry != nil {

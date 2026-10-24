@@ -50,6 +50,7 @@ func (s *Server) registerManagementV8Routes() {
 	v8.GET("/xiaohuanxiong-quota", s.mgmt.GetXiaohuanxiongQuota)
 	v8.GET("/lobsterai-server-quota", s.mgmt.GetLobsteraiServerQuota)
 	v8.GET("/loomy-quota", s.mgmt.GetLoomyQuota)
+	v8.GET("/airjelly-quota", s.mgmt.GetAirJellyQuota)
 	v8.GET("/codearts-quota", s.mgmt.GetCodeArtsQuota)
 	v8.GET("/qoder-cn-quota", s.mgmt.GetQoderCNQuota)
 	v8.GET("/qoder-ai-quota", s.mgmt.GetQoderCNQuota)
@@ -92,6 +93,12 @@ func (s *Server) registerManagementV8Routes() {
 	// are separate endpoints instead of the shared oauth/auth-url contract.
 	v8.POST("/loomy-sms-code", s.mgmt.RequestLoomySMSCode)
 	v8.POST("/loomy-login", s.mgmt.PostLoomyLogin)
+	v8.POST("/airjelly/oauth/start", s.mgmt.StartAirJellyOAuth)
+	v8.POST("/airjelly/oauth/complete", s.mgmt.CompleteAirJellyOAuth)
+	v8.POST("/airjelly/login", s.mgmt.LoginAirJellyPassword)
+	v8.POST("/airjelly/signup", s.mgmt.SignUpAirJelly)
+	v8.POST("/airjelly/signup/verify", s.mgmt.VerifyAirJellySignUp)
+	v8.POST("/airjelly/signup/resend", s.mgmt.ResendAirJellySignUpCode)
 
 	v8.GET("/plugins", s.mgmt.ListPlugins)
 	v8.DELETE("/plugins/:id", s.mgmt.DeletePlugin)

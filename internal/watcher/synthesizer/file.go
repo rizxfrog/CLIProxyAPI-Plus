@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/auth/airjelly"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -298,6 +299,15 @@ func synthesizeFileAuths(ctx *SynthesisContext, fullPath string, data []byte) ([
 		if strings.TrimSpace(a.Attributes["access_token"]) == "" {
 			if token, _ := metadata["access_token"].(string); strings.TrimSpace(token) != "" {
 				a.Attributes["access_token"] = strings.TrimSpace(token)
+			}
+		}
+	}
+	if provider == constant.AirJelly {
+		a.Attributes[coreauth.AttributeAuthKind] = coreauth.AuthKindOAuth
+		a.Attributes["base_url"] = airjelly.Gateway
+		for _, key := range []string{"access_token", "refresh_token"} {
+			if value, _ := metadata[key].(string); value != "" {
+				a.Attributes[key] = value
 			}
 		}
 	}
