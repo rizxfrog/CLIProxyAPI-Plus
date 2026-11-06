@@ -28,7 +28,10 @@ import (
 )
 
 const (
-	defaultManagementReleaseURL  = "https://api.github.com/repos/router-for-me/Cli-Proxy-API-Management-Center/releases/latest"
+	// defaultManagementReleaseURL points at this fork's panel release feed
+	// (rizxfrog/Cli-Proxy-API-Management-Center). Do NOT restore the upstream
+	// router-for-me repository when merging upstream changes.
+	defaultManagementReleaseURL  = "https://api.github.com/repos/rizxfrog/Cli-Proxy-API-Management-Center/releases/latest"
 	defaultManagementFallbackURL = "https://cpamc.router-for.me/"
 	managementAssetName          = "@management.html"
 	httpUserAgent                = "CLIProxyAPI-management-updater"

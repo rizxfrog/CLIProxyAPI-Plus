@@ -3,7 +3,16 @@
 Go 1.26+ proxy server providing OpenAI/Gemini/Claude/Codex compatible APIs with OAuth and round-robin load balancing.
 
 ## Repository
-- GitHub: https://github.com/router-for-me/CLIProxyAPI
+- Fork of https://github.com/router-for-me/CLIProxyAPI (upstream), developed as CLIProxyAPI-Plus.
+
+## Fork Remote Endpoints (DO NOT revert on upstream merges)
+This fork serves its own model catalog and management panel. When merging upstream code, these MUST keep the fork addresses:
+- General model catalog (`modelsURLs` in `internal/registry/model_updater.go`): `https://raw.githubusercontent.com/rizxfrog/CLIProxyAPI-Plus/refs/heads/feature/dev/internal/registry/models/models.json` — raw JSON only; the `github.com/.../blob/...` page URL returns HTML and fails catalog validation. The fork catalog carries fork-only provider sections (loomy/xiaohuanxiong/codearts/minimax/trae/cline/…); restoring the upstream `router-for-me/models` URL would silently drop them from remote updates.
+- Management panel (frontend) release (`DefaultPanelGitHubRepository` in `internal/config/config_defaults.go`, `defaultManagementReleaseURL` in `internal/managementasset/updater.go`, `panel-github-repository` in `config.example.yaml`): `rizxfrog/Cli-Proxy-API-Management-Center` (releases: `https://github.com/rizxfrog/Cli-Proxy-API-Management-Center/releases`).
+Intentionally still pointing at the upstream project (no fork counterpart; do not "fork-fix" these):
+- Codex client catalog (`codexClientModelsURLs`) and Devin catalog (`devinModelsURLs`) → `router-for-me/models`
+- Version update check (`latestReleaseURL` in `internal/api/handlers/management/config_basic.go`) → `router-for-me/CLIProxyAPI` releases
+- Plugin store registry (`DefaultRegistryURL` in `internal/pluginstore/registry.go`) and the `cpamc.router-for.me` management fallback page
 
 ## Commands
 ```bash

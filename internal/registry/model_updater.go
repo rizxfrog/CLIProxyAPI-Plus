@@ -16,9 +16,13 @@ import (
 // ModelsRefreshInterval is the shared cadence for model catalogs and account entitlements.
 const ModelsRefreshInterval = 3 * time.Hour
 
+// modelsURLs is the general catalog source list. This fork publishes its own
+// models.json (including fork-only provider sections) from the CLIProxyAPI-Plus
+// repository; do NOT restore the upstream router-for-me/models URLs when
+// merging upstream changes. The file is fetched as raw JSON: only the
+// raw.githubusercontent URL works here, not the github.com/blob HTML page.
 var modelsURLs = []string{
-	"https://raw.githubusercontent.com/router-for-me/models/refs/heads/main/models.json",
-	"https://models.router-for.me/models.json",
+	"https://raw.githubusercontent.com/rizxfrog/CLIProxyAPI-Plus/refs/heads/feature/dev/internal/registry/models/models.json",
 }
 
 //go:embed models/models.json
