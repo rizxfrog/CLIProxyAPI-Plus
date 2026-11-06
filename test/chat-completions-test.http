@@ -1,6 +1,6 @@
 @Token = sk-test
-@BASE_URL = http://localhost:8317
-@MODEL_ID = loomy/deepseek-v4-flash-0731
+@BASE_URL = http://106.52.70.29:8317/
+@MODEL_ID = deepseek-v4.1-flash
 @QWEN_WEB_CHAT = qwen-web-chat
 @QWEN_WEB_IMAGE = qwen-web-image
 
@@ -12,7 +12,7 @@ Content-Type: application/json
 
 {
     "model": "{{ MODEL_ID }}",
-    "messages": [{"role": "user", "content": "hi"}],
+    "messages": [{"role": "user", "content": "你是什么模型？"}],
     "stream": false
   }
 
