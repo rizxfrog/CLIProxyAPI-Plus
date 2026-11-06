@@ -1,6 +1,6 @@
 @Token = sk-test
-@BASE_URL = http://106.52.70.29:8317/
-@MODEL_ID = deepseek-v4.1-flash
+@BASE_URL = http://localhost:8317/
+@MODEL_ID = loomy/qwen3.8-flash
 @QWEN_WEB_CHAT = qwen-web-chat
 @QWEN_WEB_IMAGE = qwen-web-image
 
