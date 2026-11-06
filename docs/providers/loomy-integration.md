@@ -14,6 +14,7 @@ Provider key: `loomy`
 | 上游出处 | `dsh-codearts-auth`（gitee `iJetLi/deepseek-harness-codearts`），提交 `345f0a07`，MIT |
 | 检查日期 | 2026-10-20 |
 | 参考文件摘要 (sha256) | `loomy.ts` `4b27d3f9…3269`；`loomy-auth.ts` `4397dc7e…fd44`；`loomy-oauth.ts` `f8acff0f…36d2`；`loomy-sign.ts` `b72480b0…389e`；`loomy-adapter.ts` `92a5c025…fdb`；`loomy-product.ts` `6e89ad62…bddf`；`loomy-credits.ts` `fd820350…9756`；`loomy-wechat.ts` `4087e60c…1f1f`；`loomy-wechat-login.ts` `f05f9324…6f4f` |
+| 客户端逆向样本 | `Loomy-0.9.39-win`（Electron，`resources/app.asar` 解包），检查日期 2026-11-06 |
 
 来源标注约定：**source-confirmed** = 参考实现或客户端常量中明确的代码；**runtime-confirmed** =
 参考实现记录的实机抓包结论；**inferred** = 由相邻证据推断；**unknown** = 未取得。
@@ -122,10 +123,36 @@ POST {accountBase}/login/thirdAccount/bind/checkCode {rcode, mcode, msgid, expir
   **不能**用输入模态过滤（5 个 chat 模型支持图片输入，与生图模型无关）。
 - 字段映射：`name` → 展示名；`context_length` → 上下文；`reasoning_efforts` → 档位；
   `capabilities.reasoning` → 是否声明推理；`capabilities.input_modalities` 含 `image` → 视觉。
-- 兜底目录：`internal/registry/models/loomy_models.json`（8 条，2026-09-26 实测的 chat 切片）。
+- 兜底目录：`internal/registry/models/models.json` 的 `loomy` 分节（2026-09-26 实测 chat 切片的重新生成版，当前 6 条）。
   远端拉取失败或为空时保留兜底表并延期重试，**不**撤销全部模型（那会让凭据不可用）。
 - 已知分歧：`spark-x` 远端声明 1048576，Loomy 客户端本地表强制 262144；兜底表**采信远端**，
   并在描述中记录该分歧。
+
+### 6.1 客户端逆向证据（Loomy-0.9.39-win，2026-11-06）
+
+解包 `resources/app.asar` 还原了客户端取模型列表的调用链（**source-confirmed**，客户端代码）：
+
+- 端点与鉴权印证 §5.1：`GET {baseURL}/models`，头**仅**小写 `token: <session>`
+  （`authMode:'token'`，不发 Bearer），另带 `Accept/Content-Type: application/json`，
+  10s 超时（`electron/model-service.js` `fetchModelsFromProvider`）。
+- `baseURL` 不是模板常量：运行时由 `pointsConfig.baseUrl` 强制覆写 provider `imodel`
+  （`electron/bundled-resources.js`），非 `/api/v1` 结尾则追加——即模型列表与积分接口
+  共用同一 baseUrl 解析链；生产值 `https://loomyad.xunfei.cn/api/v1`（见 §7.1），
+  `opencode-home-template/opencode.json` 里的 `ossptest…/api/v1` 只是被覆盖的测试默认值。
+- 刷新链：renderer `window.electronAPI.refreshSessionModels()` → IPC
+  `opencode:config:refreshSessionModels` → `syncSessionAuthProviderModels`，只对
+  `useSessionAuth:true` 的主 provider 拉取，anthropic companion 由主 provider 派生。
+- 响应为 OpenAI 兼容 `{data:[…]}`；客户端消费字段：`id`/`name`、`protocol`
+  （按 openai/anthropic 分桶路由）、`is_default_model`/`is_default_small_model`
+  （服务端指定默认主/小模型，本仓库未消费）、`context_length`、`input_token_limit`、
+  `capabilities.input_modalities`/`output_modalities`/`function_calling`、`reasoning`、
+  `tool_call`、`attachment`。
+- **与 §6 的差异**：客户端**不按 `type === "chat"` 过滤**，而是按 `protocol` 分桶；
+  `type` 过滤是参考实现（dsh channel pack）的口径。两者对 5 个带图片输入的 chat 模型
+  结论一致（都不按输入模态过滤）。
+- 失败兜底：HTTP 404/500 时按 host 匹配内置 fallback 表（星火等不支持 `/models` 的
+  供应商），不视为致命——与本仓库「远端拉取失败保留兜底目录」的策略同构。
+- 可执行验证脚本：`docs/scripts/loomy_models.py`（模型列表 + §7.1 额度读取）。
 
 ## 7. 额度 (Quota) — 三个独立职责
 
@@ -138,6 +165,35 @@ POST {accountBase}/login/thirdAccount/bind/checkCode {rcode, mcode, msgid, expir
 - `POST /points/first-login` 是**写**端点（每日额度初始化，幂等，判据 `alreadyProcessed`），
   只在登录后尽力调用一次，**不**在面板打开时调用（**source-confirmed**，`loomy-credits.ts`）。
 - `dailyQuota` 只在写端点响应里出现；读接口缺省时**不**硬编码 5000。
+
+### 7.1 客户端逆向证据（Loomy-0.9.39-win，2026-11-06）
+
+解包 `resources/app.asar`（Electron 壳，业务逻辑全在 JS）逐层还原了积分详情页取额度的调用链，
+与 §4/§7 的口径相互印证（**source-confirmed**，客户端代码）：
+
+- 取额度接口即本实现探活/额度观测所用的同一端点：
+  `GET {pointsBase}/api/v1/points/records?pageNo=1&pageSize=1&recordType=all`，
+  头**仅**小写 `token: <session>`（`electron/points-service.js` `queryRecords` →
+  `request()`；渲染层 `o9()` 用 `pageSize=1` 的流水查询同时取余额）。
+- 原始响应字段（非本仓库归一化后的名字）：`data.balance` = 永久/长期积分（客户端强制
+  `Number.isFinite`，缺失即报错），`data.dailyBalance` = 每日赠送积分；另有
+  `dailyLimitPoints`/`dailyConsumedPoints`/`dailyRemainingPoints`（个人）与 `teamDaily*`
+  （团队）被客户端以「可空」方式解析（非有限值即丢弃）。故静态证据只能证明读接口
+  **可能**返回每日窗口字段，不能证明必然出现——§7「缺省即未知」的口径保持不变。
+  客户端把首条响应缓存到 localStorage `loomy-points-summary`。
+- 业务码语义印证 §4：`code !== '000000'` 为失败，`100002` = 未登录/登录失效
+  （客户端触发 re-login 后重试）。
+- 生产 base URL 证据：`resources/.env.prod` 为 `LOOMYENC1:` 前缀的 AES-256-GCM 密文
+  （口令硬编码于 `electron/utils/env-file-crypto.js`，客户端自述仅为混淆），解密得
+  `LOOMY_POINTS_BASE_URL=https://loomyad.xunfei.cn`，与 §2 `LOOMY_API_BASE` 一致；
+  安装包内默认值 `points-config.js` 指向测试环境 `ossptest.voicecloud.cn/loomy/integration`。
+- 其余积分端点（同 base、同 `token` 头）：`/api/v2/points/records`（`direction=debit|credit`、
+  `granularity=msg`，消耗/获得标签页）、`/api/v1/team-points/balance`（`currentBalance`）、
+  `/api/v2/team-points/records`、`/api/v1/points/by-chat?chatId=`、`/api/v1/points/by-turn`、
+  `/api/v1/points/first-login`、`/api/v1/points/redemption-codes/redeem`、
+  `/api/v1/points/activation`、`/api/v1/pet-work(/rewards)`、`/api/v1/invitation-codes`、
+  `/api/v1/user/identity`。客户端调用链：renderer `window.electronAPI.points.*` →
+  IPC `points:query-records` 等（`electron/ipc/account-business-ipc.js`）→ `PointsService`。
 
 ## 8. 注册清单 (Registration checklist)
 
@@ -153,7 +209,7 @@ POST {accountBase}/login/thirdAccount/bind/checkCode {rcode, mcode, msgid, expir
 | 凭据合成 | `internal/watcher/synthesizer/file.go`（`base_url`、`access_token`、OAuth kind） | 已实现 |
 | 执行器 | `internal/runtime/executor/loomy_executor.go`（完整 `ProviderExecutor`） | 已实现 |
 | 执行器绑定 | `sdk/cliproxy/service_executors.go` | 已实现 |
-| 模型注册 | `sdk/cliproxy/service_models.go` + `internal/registry/loomy_models.go` | 已实现 |
+| 模型注册 | `sdk/cliproxy/service_models.go` + `internal/registry/model_definitions.go`（共享目录 `loomy` 分节） | 已实现 |
 | 目录探活/刷新 | `sdk/cliproxy/loomy_models.go` + `service_lifecycle.go` | 已实现 |
 | 管理端模型目录 | `internal/api/handlers/management/provider_models.go` | 已实现 |
 | 翻译器 | 复用既有 OpenAI 翻译器（无新增） | 不适用 |
