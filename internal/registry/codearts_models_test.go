@@ -1,15 +1,21 @@
 package registry
 
 import (
-	"strings"
 	"testing"
 )
 
-// TestGetCodeArtsModels pins the embedded catalog and its defaults.
+// codeArtsGatewayMaxTokens is the output ceiling the CodeArts gateway accepts.
+// It is deliberately 65536 rather than the per-model values the upstream
+// catalog advertises (131072-393216): the gateway validates max_tokens
+// server-side and rejects anything above 65536 with an InferHub
+// RANGE_VALIDATOR 400.
+const codeArtsGatewayMaxTokens = 65536
+
+// TestGetCodeArtsModels verifies the shared catalog's codearts section.
 func TestGetCodeArtsModels(t *testing.T) {
 	models := GetCodeArtsModels()
 	if len(models) == 0 {
-		t.Fatal("codearts catalog is empty")
+		t.Fatal("codearts section of the shared catalog is empty")
 	}
 
 	byID := make(map[string]*ModelInfo, len(models))
@@ -41,9 +47,9 @@ func TestGetCodeArtsModels(t *testing.T) {
 	// stay within the server-enforced ceiling regardless of the larger values
 	// the upstream catalog advertises.
 	for _, model := range models {
-		if model.MaxCompletionTokens > codeArtsMaxCatalogTokens {
+		if model.MaxCompletionTokens > codeArtsGatewayMaxTokens {
 			t.Errorf("model %s declares max_completion_tokens %d, above the gateway ceiling %d",
-				model.ID, model.MaxCompletionTokens, codeArtsMaxCatalogTokens)
+				model.ID, model.MaxCompletionTokens, codeArtsGatewayMaxTokens)
 		}
 	}
 
@@ -109,23 +115,7 @@ func TestGetCodeArtsModelsReturnsClone(t *testing.T) {
 		t.Fatal("the catalog was mutated through a returned slice")
 	}
 	if second[0].ID != original {
-		t.Fatalf("catalog changed: %q != %q", second[0].ID, original)
-	}
-}
-
-// TestLookupCodeArtsModel pins the single-model lookup.
-func TestLookupCodeArtsModel(t *testing.T) {
-	if got := LookupCodeArtsModel("GLM-5.2"); got == nil || got.ID != "GLM-5.2" {
-		t.Fatalf("lookup GLM-5.2 = %+v", got)
-	}
-	if got := LookupCodeArtsModel("  GLM-5.2  "); got == nil {
-		t.Fatal("lookup should trim whitespace")
-	}
-	if got := LookupCodeArtsModel("does-not-exist"); got != nil {
-		t.Fatalf("unexpected lookup result: %+v", got)
-	}
-	if got := LookupCodeArtsModel(""); got != nil {
-		t.Fatalf("empty lookup should return nil, got %+v", got)
+		t.Fatalf("clone lost the original id: %q", second[0].ID)
 	}
 }
 
@@ -137,7 +127,7 @@ func TestGetStaticModelDefinitionsByChannelCodeArts(t *testing.T) {
 		t.Fatal("codearts channel returned no models")
 	}
 	for _, model := range models {
-		if strings.TrimSpace(model.ID) == "" {
+		if model.ID == "" {
 			t.Error("a model has an empty id")
 		}
 	}
@@ -151,42 +141,6 @@ func TestGetStaticModelDefinitionsByChannelCodeArts(t *testing.T) {
 func TestLookupStaticModelInfoFindsCodeArts(t *testing.T) {
 	if got := LookupStaticModelInfo("GLM-5.2"); got == nil || got.ID != "GLM-5.2" {
 		t.Fatalf("LookupStaticModelInfo(GLM-5.2) = %+v", got)
-	}
-	// The fallback list must stay aligned with the embedded catalog so a parse
-	// failure cannot silently drop models or reintroduce unsupported limits.
-	for _, model := range staticCodeArtsModels {
-		if model.MaxCompletionTokens != codeArtsMaxCatalogTokens {
-			t.Errorf("static %s max_completion_tokens = %d, want %d",
-				model.ID, model.MaxCompletionTokens, codeArtsMaxCatalogTokens)
-		}
-	}
-	byID := make(map[string]struct{}, len(staticCodeArtsModels))
-	for _, model := range staticCodeArtsModels {
-		byID[model.ID] = struct{}{}
-	}
-	for _, id := range []string{"GLM-5.2", "glm-5.2-sft-harmony", "openpangu-2.0-pro", "openpangu-2.0-flash", "Qwen3-VL-235B"} {
-		if _, ok := byID[id]; !ok {
-			t.Errorf("static fallback is missing %s", id)
-		}
-	}
-}
-
-// TestNormalizeCodeArtsModelsDropsInvalidEntries pins normalization.
-func TestNormalizeCodeArtsModelsDropsInvalidEntries(t *testing.T) {
-	models := normalizeCodeArtsModels([]*ModelInfo{
-		nil,
-		{ID: ""},
-		{ID: "  keep-me  "},
-		{ID: "keep-me"}, // duplicate
-	})
-	if len(models) != 1 {
-		t.Fatalf("normalized to %d models, want 1: %+v", len(models), models)
-	}
-	if models[0].ID != "keep-me" {
-		t.Fatalf("id = %q, want keep-me", models[0].ID)
-	}
-	if models[0].Object != "model" || models[0].Type != "codearts" || models[0].OwnedBy != "huaweicloud" {
-		t.Fatalf("defaults not applied: %+v", models[0])
 	}
 }
 

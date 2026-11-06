@@ -121,3 +121,32 @@ func TestDetectChangedProviders_KimiAliases(t *testing.T) {
 		}
 	}
 }
+
+// TestDetectChangedProvidersIncludesMergedForkSections pins that the sections
+// migrated from dedicated embedded files are tracked by change detection so a
+// remote update to them re-registers the affected credentials.
+func TestDetectChangedProvidersIncludesMergedForkSections(t *testing.T) {
+	oldData := &staticModelsJSON{
+		Xiaohuanxiong: []*ModelInfo{{ID: "glm-5-3"}},
+		CodeArts:      []*ModelInfo{{ID: "GLM-5.1"}},
+		Loomy:         []*ModelInfo{{ID: "spark-x2.6"}},
+	}
+	newData := &staticModelsJSON{
+		Xiaohuanxiong: []*ModelInfo{{ID: "glm-5-3"}, {ID: "kimi-k3"}},
+		CodeArts:      []*ModelInfo{{ID: "GLM-5.2"}},
+		Loomy:         []*ModelInfo{{ID: "spark-x2.6", DisplayName: "Spark X2.6"}},
+	}
+
+	got := detectChangedProviders(oldData, newData)
+	want := map[string]bool{"xiaohuanxiong": false, "codearts": false, "loomy": false}
+	for _, provider := range got {
+		if _, ok := want[provider]; ok {
+			want[provider] = true
+		}
+	}
+	for provider, seen := range want {
+		if !seen {
+			t.Errorf("detectChangedProviders() = %v, missing changed provider %q", got, provider)
+		}
+	}
+}

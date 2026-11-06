@@ -49,6 +49,9 @@ type staticModelsJSON struct {
 	Minimax         []*ModelInfo `json:"minimax"`
 	Floatboat       []*ModelInfo `json:"floatboat"`
 	LobsteraiServer []*ModelInfo `json:"lobsterai-server"`
+	Xiaohuanxiong   []*ModelInfo `json:"xiaohuanxiong"`
+	CodeArts        []*ModelInfo `json:"codearts"`
+	Loomy           []*ModelInfo `json:"loomy"`
 }
 
 // GetClaudeModels returns the standard Claude model definitions.
@@ -1220,6 +1223,23 @@ func GetMetaModels() []*ModelInfo {
 	return cloneModelInfos(getModels().Meta)
 }
 
+// GetXiaohuanxiongModels returns the Xiaohuanxiong (SenseTime Raccoon) catalog.
+func GetXiaohuanxiongModels() []*ModelInfo {
+	return cloneModelInfos(getModels().Xiaohuanxiong)
+}
+
+// GetCodeArtsModels returns the Huawei Cloud CodeArts catalog.
+func GetCodeArtsModels() []*ModelInfo {
+	return cloneModelInfos(getModels().CodeArts)
+}
+
+// GetLoomyModels returns the Loomy catalog. The Loomy business gateway still
+// owns the real per-account list (probed at runtime); the shared catalog
+// section is the embedded fallback.
+func GetLoomyModels() []*ModelInfo {
+	return cloneModelInfos(getModels().Loomy)
+}
+
 // LookupStaticModelInfo searches all static model definitions for a model by ID.
 // Returns nil if no matching model is found.
 func LookupStaticModelInfo(modelID string) *ModelInfo {
@@ -1240,8 +1260,8 @@ func LookupStaticModelInfo(modelID string) *ModelInfo {
 		data.XAI,
 		GetDevinModels(),
 		GetMetaModels(),
-		GetXiaohuanxiongModels(),
-		GetCodeArtsModels(),
+		data.Xiaohuanxiong,
+		data.CodeArts,
 		data.Minimax,
 		data.Floatboat,
 		data.LobsteraiServer,
@@ -1249,7 +1269,7 @@ func LookupStaticModelInfo(modelID string) *ModelInfo {
 		// provider's entry: its measured catalogue reuses vendor model names
 		// (for example MiniMax-M3) with different capacities, and provider-aware
 		// lookups reach it through LookupStaticModelInfoByChannel.
-		GetLoomyModels(),
+		data.Loomy,
 	}
 	for _, models := range allModels {
 		for _, m := range models {

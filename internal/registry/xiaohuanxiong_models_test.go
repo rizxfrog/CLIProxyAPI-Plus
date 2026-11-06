@@ -1,16 +1,16 @@
 package registry
 
 import (
+	"encoding/json"
 	"testing"
 )
 
-// TestGetXiaohuanxiongModelsLoadsEmbeddedCatalog verifies the dedicated embedded
-// file is parsed. It is separate from models.json so a remote catalog refresh
-// cannot erase the provider's models.
-func TestGetXiaohuanxiongModelsLoadsEmbeddedCatalog(t *testing.T) {
+// TestGetXiaohuanxiongModelsLoadsSharedCatalog verifies the xiaohuanxiong
+// section of the shared models.json is loaded.
+func TestGetXiaohuanxiongModelsLoadsSharedCatalog(t *testing.T) {
 	models := GetXiaohuanxiongModels()
 	if len(models) == 0 {
-		t.Fatal("embedded xiaohuanxiong catalog is empty")
+		t.Fatal("xiaohuanxiong section of the shared catalog is empty")
 	}
 	ids := make(map[string]*ModelInfo, len(models))
 	for _, model := range models {
@@ -56,7 +56,7 @@ func TestCodeBuddyCNIncludesStep5Preview(t *testing.T) {
 // TestXiaohuanxiongCatalogThinkingMetadata guards the capability data that drives
 // whether thinking is offered to clients.
 func TestXiaohuanxiongCatalogThinkingMetadata(t *testing.T) {
-	if model := LookupXiaohuanxiongModel("glm-5-3"); model == nil {
+	if model := LookupStaticModelInfoByChannel("glm-5-3", "xiaohuanxiong"); model == nil {
 		t.Fatal("glm-5-3 not found")
 	} else if model.Thinking == nil {
 		t.Fatal("glm-5-3 must declare thinking support")
@@ -70,7 +70,7 @@ func TestXiaohuanxiongCatalogThinkingMetadata(t *testing.T) {
 	}
 
 	// SenseNova does not expose a thinking channel; it must not advertise one.
-	if model := LookupXiaohuanxiongModel("sn-sensenova-6-8-flash-lite"); model == nil {
+	if model := LookupStaticModelInfoByChannel("sn-sensenova-6-8-flash-lite", "xiaohuanxiong"); model == nil {
 		t.Fatal("sn-sensenova-6-8-flash-lite not found")
 	} else if model.Thinking != nil {
 		t.Fatalf("sensenova must not advertise thinking support: %+v", model.Thinking)
@@ -79,7 +79,7 @@ func TestXiaohuanxiongCatalogThinkingMetadata(t *testing.T) {
 
 // TestXiaohuanxiongContextWindows pins the documented Claude Code ceilings.
 func TestXiaohuanxiongContextWindows(t *testing.T) {
-	defaultModel := LookupXiaohuanxiongModel("raccoon-chat-ml-5-5")
+	defaultModel := LookupStaticModelInfoByChannel("raccoon-chat-ml-5-5", "xiaohuanxiong")
 	if defaultModel == nil {
 		t.Fatal("default model not found")
 	}
@@ -91,11 +91,11 @@ func TestXiaohuanxiongContextWindows(t *testing.T) {
 	}
 }
 
-// TestLookupXiaohuanxiongModelMissesCleanly avoids accidental cross-provider hits.
-func TestLookupXiaohuanxiongModelMissesCleanly(t *testing.T) {
+// TestXiaohuanxiongChannelLookupMissesCleanly avoids accidental cross-provider hits.
+func TestXiaohuanxiongChannelLookupMissesCleanly(t *testing.T) {
 	for _, miss := range []string{"", "   ", "does-not-exist", "claude-sonnet-4"} {
-		if got := LookupXiaohuanxiongModel(miss); got != nil {
-			t.Fatalf("LookupXiaohuanxiongModel(%q) = %+v, want nil", miss, got)
+		if got := LookupStaticModelInfoByChannel(miss, "xiaohuanxiong"); got != nil {
+			t.Fatalf("LookupStaticModelInfoByChannel(%q, xiaohuanxiong) = %+v, want nil", miss, got)
 		}
 	}
 }
@@ -112,18 +112,29 @@ func TestXiaohuanxiongChannelDispatch(t *testing.T) {
 	}
 }
 
-// TestXiaohuanxiongModelsAreNotInSharedCatalog documents the durability contract:
-// models.json must not carry the section, because the remote updater replaces
-// that file's contents wholesale and would drop the provider.
-func TestXiaohuanxiongModelsAreNotInSharedCatalog(t *testing.T) {
-	cached := getModels()
-	if cached == nil {
-		t.Skip("shared catalog not loaded in this test context")
+// TestXiaohuanxiongRefreshKeepsSection documents the durability contract: the
+// section ships in models.json, and a remote catalog that omits it must not
+// drop the provider (preserveLocalCatalogSections).
+func TestXiaohuanxiongRefreshKeepsSection(t *testing.T) {
+	previous := getModels()
+	if previous == nil || len(previous.Xiaohuanxiong) == 0 {
+		t.Fatal("test setup: shared catalog has no xiaohuanxiong section")
 	}
-	// The type intentionally has no Xiaohuanxiong field. Assert indirectly:
-	// channel dispatch must still resolve models from the embedded store.
-	models := GetStaticModelDefinitionsByChannel("xiaohuanxiong")
-	if len(models) == 0 {
-		t.Fatal("xiaohuanxiong models must resolve from the embedded store, not models.json")
+	t.Cleanup(func() {
+		modelsCatalogStore.mu.Lock()
+		modelsCatalogStore.data = previous
+		modelsCatalogStore.mu.Unlock()
+	})
+
+	// An upstream catalog that carries official providers only.
+	upstream, errMarshal := json.Marshal(&staticModelsJSON{Claude: []*ModelInfo{{ID: "claude-opus-5-5"}}})
+	if errMarshal != nil {
+		t.Fatal(errMarshal)
+	}
+	if _, errPublish := publishCatalogBytes(upstream); errPublish != nil {
+		t.Fatalf("publishCatalogBytes() error = %v", errPublish)
+	}
+	if got := len(getModels().Xiaohuanxiong); got != len(previous.Xiaohuanxiong) {
+		t.Fatalf("refresh dropped the xiaohuanxiong section: got %d models, want %d", got, len(previous.Xiaohuanxiong))
 	}
 }

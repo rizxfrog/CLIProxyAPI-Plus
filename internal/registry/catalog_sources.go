@@ -183,7 +183,8 @@ func publishCatalogBytes(data []byte) ([]string, error) {
 // publishes when the incoming catalog omits them. The shared upstream catalog
 // carries the official providers only, so a wholesale replace would silently
 // drop fork provider models (MiniMax Code managed accounts, CodeBuddy,
-// DeepSeek Web, TRAE, Cline, Qoder) that are built into the embedded catalog.
+// DeepSeek Web, TRAE, Cline, Qoder, Xiaohuanxiong, CodeArts, Loomy) that are
+// built into the embedded catalog.
 // A section present in the incoming payload always wins, so upstream can take
 // over any of these providers later.
 func preserveLocalCatalogSections(parsed, old *staticModelsJSON) {
@@ -205,6 +206,9 @@ func preserveLocalCatalogSections(parsed, old *staticModelsJSON) {
 		{old.Minimax, &parsed.Minimax},
 		{old.Floatboat, &parsed.Floatboat},
 		{old.LobsteraiServer, &parsed.LobsteraiServer},
+		{old.Xiaohuanxiong, &parsed.Xiaohuanxiong},
+		{old.CodeArts, &parsed.CodeArts},
+		{old.Loomy, &parsed.Loomy},
 	}
 	for _, section := range sections {
 		if len(*section.incoming) == 0 && len(section.local) > 0 {

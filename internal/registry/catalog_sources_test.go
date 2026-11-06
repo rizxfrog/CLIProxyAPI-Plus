@@ -130,9 +130,10 @@ func TestCatalogRefreshKeepsLastValidData(t *testing.T) {
 // TestPublishCatalogBytesKeepsForkSections guards the invariant that a remote
 // refresh of the shared upstream catalog cannot drop the provider sections this
 // fork publishes: MiniMax Code managed accounts, CodeBuddy, DeepSeek Web, TRAE,
-// Cline, Qoder, and Meta. Those models are built into the embedded catalog and
-// absent from the upstream payload, so a wholesale replace would erase them and
-// silently unlist every one of those providers.
+// Cline, Qoder, Meta, Xiaohuanxiong, CodeArts, and Loomy. Those models are
+// built into the embedded catalog and absent from the upstream payload, so a
+// wholesale replace would erase them and silently unlist every one of those
+// providers.
 func TestPublishCatalogBytesKeepsForkSections(t *testing.T) {
 	install := func(t *testing.T, data *staticModelsJSON) *staticModelsJSON {
 		t.Helper()
@@ -150,29 +151,35 @@ func TestPublishCatalogBytesKeepsForkSections(t *testing.T) {
 
 	forkSections := func(data *staticModelsJSON) map[string]int {
 		return map[string]int{
-			"minimax":      len(data.Minimax),
-			"codebuddy-cn": len(data.CodeBuddyCN),
-			"codebuddy-ai": len(data.CodeBuddyAI),
-			"deepseek-web": len(data.DeepSeekWeb),
-			"trae":         len(data.Trae),
-			"cline":        len(data.Cline),
-			"qoder-cn":     len(data.QoderCN),
-			"qoder-ai":     len(data.QoderAI),
-			"meta":         len(data.Meta),
+			"minimax":       len(data.Minimax),
+			"codebuddy-cn":  len(data.CodeBuddyCN),
+			"codebuddy-ai":  len(data.CodeBuddyAI),
+			"deepseek-web":  len(data.DeepSeekWeb),
+			"trae":          len(data.Trae),
+			"cline":         len(data.Cline),
+			"qoder-cn":      len(data.QoderCN),
+			"qoder-ai":      len(data.QoderAI),
+			"meta":          len(data.Meta),
+			"xiaohuanxiong": len(data.Xiaohuanxiong),
+			"codearts":      len(data.CodeArts),
+			"loomy":         len(data.Loomy),
 		}
 	}
 
 	current := &staticModelsJSON{
-		Claude:      []*ModelInfo{{ID: "claude-opus-5-5"}},
-		Minimax:     []*ModelInfo{{ID: "minimax-m2.7"}},
-		CodeBuddyCN: []*ModelInfo{{ID: "hy3"}},
-		CodeBuddyAI: []*ModelInfo{{ID: "claude-sonnet-5"}},
-		DeepSeekWeb: []*ModelInfo{{ID: "deepseek-v4-pro"}},
-		Trae:        []*ModelInfo{{ID: "trae-solo"}},
-		Cline:       []*ModelInfo{{ID: "cline-1"}},
-		QoderCN:     []*ModelInfo{{ID: "qmodel"}},
-		QoderAI:     []*ModelInfo{{ID: "qmodel-ai"}},
-		Meta:        []*ModelInfo{{ID: "muse-spark-1.3"}},
+		Claude:        []*ModelInfo{{ID: "claude-opus-5-5"}},
+		Minimax:       []*ModelInfo{{ID: "minimax-m2.7"}},
+		CodeBuddyCN:   []*ModelInfo{{ID: "hy3"}},
+		CodeBuddyAI:   []*ModelInfo{{ID: "claude-sonnet-5"}},
+		DeepSeekWeb:   []*ModelInfo{{ID: "deepseek-v4-pro"}},
+		Trae:          []*ModelInfo{{ID: "trae-solo"}},
+		Cline:         []*ModelInfo{{ID: "cline-1"}},
+		QoderCN:       []*ModelInfo{{ID: "qmodel"}},
+		QoderAI:       []*ModelInfo{{ID: "qmodel-ai"}},
+		Meta:          []*ModelInfo{{ID: "muse-spark-1.3"}},
+		Xiaohuanxiong: []*ModelInfo{{ID: "raccoon-chat-ml-5-5"}},
+		CodeArts:      []*ModelInfo{{ID: "GLM-5.2"}},
+		Loomy:         []*ModelInfo{{ID: "spark-x2.6"}},
 	}
 	install(t, current)
 
