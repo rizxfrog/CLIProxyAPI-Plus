@@ -191,7 +191,7 @@ func (s *Service) loomyModelsForCatalogue(auth *coreauth.Auth, catalogue []loomy
 	}
 	models = applyExcludedModels(models, excluded)
 	models = applyOAuthModelAliasForAuth(cfg, constant.Loomy, auth.AuthKind(), auth.Attributes, models)
-	models = s.appendPluginModels(constant.Loomy, models)
+	models = s.appendPluginModels(constant.Loomy, models, excluded)
 	models = applyOAuthSettingsForAuth(cfg, constant.Loomy, auth.AuthKind(), models)
 	return applyModelPrefixes(models, auth.Prefix, cfg.ForceModelPrefix)
 }

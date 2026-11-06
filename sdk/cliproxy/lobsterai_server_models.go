@@ -201,7 +201,7 @@ func (s *Service) lobsteraiServerModelsForCatalogue(auth *coreauth.Auth, catalog
 	}
 	models = applyExcludedModels(models, excluded)
 	models = applyOAuthModelAliasForAuth(cfg, constant.LobsteraiServer, auth.AuthKind(), auth.Attributes, models)
-	models = s.appendPluginModels(constant.LobsteraiServer, models)
+	models = s.appendPluginModels(constant.LobsteraiServer, models, excluded)
 	models = applyOAuthSettingsForAuth(cfg, constant.LobsteraiServer, auth.AuthKind(), models)
 	return applyModelPrefixes(models, auth.Prefix, cfg.ForceModelPrefix)
 }

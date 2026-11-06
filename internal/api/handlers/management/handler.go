@@ -63,6 +63,9 @@ type Handler struct {
 	pluginStoreHTTPClient   pluginstore.HTTPDoer
 	pluginStoreRateLimiter  *pluginstore.GitHubRateLimiter
 	pluginReleases          pluginReleaseCache
+	siwcOAuthFactory        func(*config.Config) siwcOAuthService
+	siwcCommitMu            sync.Mutex
+	pluginLoginSaveMu       sync.Mutex
 }
 
 type configReloadSnapshot struct {
@@ -124,14 +127,64 @@ func NewHandlerWithoutConfigFilePath(cfg *config.Config, manager *coreauth.Manag
 }
 
 // SetConfig updates the in-memory config reference when the server hot-reloads.
+// A config parsed from an older version of the config file is ignored: a later
+// save already changed the file, and the reload for that save publishes it.
 func (h *Handler) SetConfig(cfg *config.Config) {
 	if h == nil {
 		return
 	}
 	cloned := cfg.CloneForRuntime()
 	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.isStaleConfigFileSnapshotLocked(cloned) {
+		log.Debug("management: ignoring config reload parsed from an older config file version")
+		return
+	}
 	h.cfg = cloned
-	h.mu.Unlock()
+}
+
+// configSnapshot reads h.cfg under h.mu, for code that runs outside the request holding it.
+func (h *Handler) configSnapshot() *config.Config {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.cfg
+}
+
+// oauthConfigWithProxy returns a configuration snapshot for an OAuth session.
+// When proxyURL is non-empty, it returns a cloned config with ProxyURL overridden
+// without mutating the shared handler configuration.
+func (h *Handler) oauthConfigWithProxy(proxyURL string) *config.Config {
+	cfg := h.configSnapshot()
+	proxyURL = strings.TrimSpace(proxyURL)
+	if proxyURL == "" {
+		return cfg
+	}
+	if cfg == nil {
+		return &config.Config{
+			SDKConfig: config.SDKConfig{ProxyURL: proxyURL},
+		}
+	}
+	cloned := cfg.CloneForRuntime()
+	if cloned == nil {
+		copied := *cfg
+		cloned = &copied
+	}
+	cloned.ProxyURL = proxyURL
+	return cloned
+}
+
+// isStaleConfigFileSnapshotLocked reports whether cfg was parsed from config file
+// bytes that are no longer on disk. Management saves hold h.mu, so none can land
+// during the check. Callers must hold h.mu.
+func (h *Handler) isStaleConfigFileSnapshotLocked(cfg *config.Config) bool {
+	if cfg == nil || cfg.SourceHash == "" || h.configFilePath == "" {
+		return false
+	}
+	data, errRead := os.ReadFile(h.configFilePath)
+	if errRead != nil {
+		return false
+	}
+	return config.ComputeSourceHash(data) != cfg.SourceHash
 }
 
 // SetAuthManager updates the auth manager reference used by management endpoints.
@@ -406,13 +459,6 @@ func (h *Handler) AuthenticateManagementKey(clientIP string, localClient bool, p
 	return true, 0, ""
 }
 
-// persist saves the current in-memory config to disk.
-func (h *Handler) persist(c *gin.Context) bool {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return h.persistLocked(c)
-}
-
 // persistLocked saves the current in-memory config to disk.
 // It expects the caller to hold h.mu.
 func (h *Handler) persistLocked(c *gin.Context) bool {
@@ -431,7 +477,8 @@ func (h *Handler) persistLocked(c *gin.Context) bool {
 	return true
 }
 
-// Helper methods for simple types
+// Helper methods for simple types. The setter and the save run under h.mu, so a
+// reload publishing h.cfg cannot replace it between the change and the save.
 func (h *Handler) updateBoolField(c *gin.Context, set func(bool)) {
 	var body struct {
 		Value *bool `json:"value"`
@@ -440,8 +487,10 @@ func (h *Handler) updateBoolField(c *gin.Context, set func(bool)) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
 		return
 	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	set(*body.Value)
-	h.persist(c)
+	h.persistLocked(c)
 }
 
 func (h *Handler) updateIntField(c *gin.Context, set func(int)) {
@@ -452,8 +501,10 @@ func (h *Handler) updateIntField(c *gin.Context, set func(int)) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
 		return
 	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	set(*body.Value)
-	h.persist(c)
+	h.persistLocked(c)
 }
 
 func (h *Handler) updateStringField(c *gin.Context, set func(string)) {
@@ -464,6 +515,8 @@ func (h *Handler) updateStringField(c *gin.Context, set func(string)) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
 		return
 	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	set(*body.Value)
-	h.persist(c)
+	h.persistLocked(c)
 }

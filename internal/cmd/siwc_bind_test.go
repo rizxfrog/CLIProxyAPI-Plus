@@ -125,7 +125,9 @@ func TestResolveSIWCBindPathRejectsInvalidTargets(t *testing.T) {
 	}
 	link := filepath.Join(authDir, "escape.json")
 	if errSymlink := os.Symlink(outside, link); errSymlink != nil {
-		t.Fatal(errSymlink)
+		// Windows requires SeCreateSymbolicLinkPrivilege (developer mode or
+		// elevation); the escape behavior itself is platform-independent.
+		t.Skipf("symlinks unavailable in this environment: %v", errSymlink)
 	}
 	if _, errResolve := ResolveSIWCBindPath(cfg, link); errResolve == nil {
 		t.Fatal("accepted symlink escaping auth-dir")
@@ -167,7 +169,7 @@ func TestResolveSIWCBindPathUsesRealAuthDirectory(t *testing.T) {
 	}
 	alias := filepath.Join(dir, "alias")
 	if errSymlink := os.Symlink(realDir, alias); errSymlink != nil {
-		t.Fatal(errSymlink)
+		t.Skipf("symlinks unavailable in this environment: %v", errSymlink)
 	}
 	path := filepath.Join(realDir, "valid.json")
 	if errWrite := os.WriteFile(path, []byte(`{"type":"codex","access_token":"access","refresh_token":"refresh"}`), 0o600); errWrite != nil {

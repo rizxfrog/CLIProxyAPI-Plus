@@ -205,7 +205,7 @@ func (s *Service) floatboatModelsForCatalogue(auth *coreauth.Auth, catalogue *fl
 	}
 	models = applyExcludedModels(models, excluded)
 	models = applyOAuthModelAliasForAuth(cfg, constant.Floatboat, auth.AuthKind(), auth.Attributes, models)
-	models = s.appendPluginModels(constant.Floatboat, models)
+	models = s.appendPluginModels(constant.Floatboat, models, excluded)
 	models = applyOAuthSettingsForAuth(cfg, constant.Floatboat, auth.AuthKind(), models)
 	return applyModelPrefixes(models, auth.Prefix, cfg.ForceModelPrefix)
 }

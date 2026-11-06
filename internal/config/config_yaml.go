@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -132,18 +133,28 @@ func SaveConfigPreserveCommentsUpdateNestedScalar(configFile string, path []stri
 	if err != nil {
 		return err
 	}
-	var root yaml.Node
-	if err = yaml.Unmarshal(data, &root); err != nil {
+	data, err = updateNestedScalarYAML(data, path, value)
+	if err != nil {
 		return err
 	}
+	return os.WriteFile(configFile, data, 0600)
+}
+
+// updateNestedScalarYAML returns data with the nested scalar key path like ["a","b"] set to
+// value, preserving comments and positions.
+func updateNestedScalarYAML(data []byte, path []string, value string) ([]byte, error) {
+	var root yaml.Node
+	if errUnmarshal := yaml.Unmarshal(data, &root); errUnmarshal != nil {
+		return nil, errUnmarshal
+	}
 	if root.Kind != yaml.DocumentNode || len(root.Content) == 0 {
-		return fmt.Errorf("invalid yaml document structure")
+		return nil, fmt.Errorf("invalid yaml document structure")
 	}
 	// Resolve aliases and merge keys before updating a path. Otherwise replacing
 	// an alias with a mapping drops inherited siblings or mutates a shared anchor.
 	var decoded map[string]any
-	if err = root.Decode(&decoded); err != nil {
-		return err
+	if errDecode := root.Decode(&decoded); errDecode != nil {
+		return nil, errDecode
 	}
 	root.Content[0] = expandConfigAliases(root.Content[0])
 	node := root.Content[0]
@@ -164,24 +175,17 @@ func SaveConfigPreserveCommentsUpdateNestedScalar(configFile string, path []stri
 			node = next
 		}
 	}
-	f, err := os.Create(configFile)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = f.Close() }()
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)
-	if err = enc.Encode(&root); err != nil {
+	if errEncode := enc.Encode(&root); errEncode != nil {
 		_ = enc.Close()
-		return err
+		return nil, errEncode
 	}
-	if err = enc.Close(); err != nil {
-		return err
+	if errClose := enc.Close(); errClose != nil {
+		return nil, errClose
 	}
-	data = NormalizeCommentIndentation(buf.Bytes())
-	_, err = f.Write(data)
-	return err
+	return NormalizeCommentIndentation(buf.Bytes()), nil
 }
 
 // NormalizeCommentIndentation removes indentation from standalone YAML comment lines to keep them left aligned.
@@ -370,6 +374,19 @@ func appendPath(path []string, key string) []string {
 // isKnownDefaultValue returns true if the given node at the specified path
 // represents a known default value that should not be written to the config file.
 // This prevents non-zero defaults from polluting the config.
+//
+// Credential connection-pool blocks (enabled, idle-conn-timeout,
+// max-idle-conns-per-host) are deliberately absent from the pointer-backed
+// zero-value whitelist below. The pruning here only applies to keys that are new
+// to the destination document: a block already present on disk is merged into its
+// existing node and survives. So an empty block (connection-pool: {} is the opt-in
+// for the default pool), an explicit enabled: false, and an explicit
+// max-idle-conns-per-host: 0 all persist when the operator wrote them by hand or
+// through the v8 management API, which writes the YAML tree directly. The
+// remaining gap is a block that only exists in an in-memory Config, for example one
+// an SDK embedder adds through sdk/config.SaveConfigPreserveComments to a file that
+// never carried it: pruning drops those zero-valued sub-keys. No management
+// endpoint mutates ProxyConnectionPool, so that path is reachable only from code.
 func isKnownDefaultValue(path []string, node *yaml.Node) bool {
 	if isPluginConfigsSubtreePath(path) {
 		return false
@@ -389,9 +406,23 @@ func isKnownDefaultValue(path []string, node *yaml.Node) bool {
 		return false
 	}
 
+	// session-date-pin-days is pointer-backed: only an explicit zero is
+	// preserved; the default value must not pollute saves.
+	if len(path) > 0 && path[len(path)-1] == "session-date-pin-days" && node != nil && node.Kind == yaml.ScalarNode && node.Tag == "!!int" && node.Value == "0" {
+		return false
+	}
+
 	// Pointer-backed booleans (such as cache-user-id and disable-cooling): explicit false is meaningful and must be preserved.
 	if len(path) > 0 && (path[len(path)-1] == "cache-user-id" || path[len(path)-1] == "disable-cooling") && node != nil && node.Kind == yaml.ScalarNode && node.Tag == "!!bool" {
 		return false
+	}
+
+	// A parent mapping carrying an explicit session-date-pin-days value must
+	// survive the zero-value check below, or the new key is never written.
+	if node != nil && node.Kind == yaml.MappingNode {
+		if pinIdx := findMapKeyIndex(node, "session-date-pin-days"); pinIdx >= 0 {
+			return false
+		}
 	}
 
 	// First check if it's a zero value
@@ -425,6 +456,8 @@ func isKnownDefaultValue(path []string, node *yaml.Node) bool {
 		switch fullPath {
 		case "error-logs-max-files":
 			return node.Value == "10"
+		case "claude.session-date-pin-days":
+			return node.Value == strconv.Itoa(DefaultClaudeSessionDatePinDays)
 		}
 	}
 
@@ -828,6 +861,12 @@ func pruneMissingMapKeys(dstMap, srcMap *yaml.Node) {
 // shouldPruneNestedMappingKeys reports whether keys missing from src should be pruned from dst.
 // Check-in configuration is an exact snapshot; credential-nested mappings such
 // as cloak and headers also prune stale keys. Other root sections are unaffected.
+//
+// Credential connection-pool blocks stay out of this list on purpose. Pruning only runs while
+// merging a document from an in-memory Config, and a removed pool sub-key can mean either
+// "delete it" or "inherit the group value" depending on the caller; guessing wrong would silently
+// change pooling for a credential. Hand-edited files and v8 management saves therefore keep a
+// sub-key until the whole block is removed.
 func shouldPruneNestedMappingKeys(path []string) bool {
 	if len(path) > 0 && path[0] == "auto-checkin" {
 		return true

@@ -15,10 +15,12 @@ type ProviderModel = internalconfig.ProviderModel
 type ModelCatalogs = internalconfig.ModelCatalogs
 
 type ClientConfig = internalconfig.ClientConfig
+type ClaudeClientConfig = internalconfig.ClaudeClientConfig
 type CodexClientConfig = internalconfig.CodexClientConfig
 type AutoCheckinConfig = internalconfig.AutoCheckinConfig
 type CheckinProviderConfig = internalconfig.CheckinProviderConfig
 type CheckinWindow = internalconfig.CheckinWindow
+type CodexWebSearchResultCacheConfig = internalconfig.CodexWebSearchResultCacheConfig
 type StreamingConfig = internalconfig.StreamingConfig
 type ClaudeCodeConfig = internalconfig.ClaudeCodeConfig
 type TLSConfig = internalconfig.TLSConfig
@@ -32,6 +34,7 @@ type PayloadRule = internalconfig.PayloadRule
 type PayloadFilterRule = internalconfig.PayloadFilterRule
 type PayloadModelRule = internalconfig.PayloadModelRule
 
+type ProxyConnectionPoolConfig = internalconfig.ProxyConnectionPoolConfig
 type GeminiKey = internalconfig.GeminiKey
 
 // TraeKey is the TRAE SOLO CN desktop credential type.

@@ -74,6 +74,9 @@ type Result struct {
 	RouteModel string
 	// Success marks whether the execution succeeded.
 	Success bool
+	// CompletedResponse reports that the upstream execution produced a completed
+	// generation response (as opposed to an incomplete stream or non-generation call).
+	CompletedResponse bool
 	// RetryAfter carries a provider supplied retry hint (e.g. 429 retryDelay).
 	RetryAfter *time.Duration
 	// CredentialScope indicates that the failure affects the whole credential across models (e.g. Anthropic 5h/7d unified limits).
@@ -86,10 +89,18 @@ type Result struct {
 	// observed watermark. Count-tokens requests reuse the credential but are not
 	// generation traffic; their response headers are not a generation snapshot.
 	SkipQuotaObservation bool
+	// AccessToken captures the active access token under which the request was executed.
+	AccessToken string
 	// CredentialVersion captures the credential version under which the request was executed.
 	CredentialVersion uint64
 	// RegistrationEpoch captures the registration epoch under which the request was executed.
 	RegistrationEpoch uint64
+	// ExecutionSeq is the manager-local monotonic sequence assigned when the
+	// execution was dispatched upstream. It orders in-flight executions so a
+	// success dispatched before a cooldown was recorded cannot clear that
+	// cooldown. Zero means unknown (direct MarkResult callers) and is exempt
+	// from the ordering guard.
+	ExecutionSeq uint64
 }
 
 // Selector chooses an auth candidate for execution.
@@ -172,12 +183,15 @@ type Manager struct {
 	selectorMu                sync.Mutex
 	configCooldownMu          sync.Mutex
 	syncSchedulerMu           sync.Mutex
-	structuralEpoch           atomic.Uint64
-	syncedVersion             atomic.Uint64
-	auths                     map[string]*Auth
-	authEpochs                map[string]uint64
-	authChangeWatchers        map[string]map[chan struct{}]struct{}
-	scheduler                 *authScheduler
+	// executionSeq stamps upstream dispatches with a monotonic sequence used
+	// to reject cooldown clears from executions dispatched before the cooldown.
+	executionSeq       atomic.Uint64
+	structuralEpoch    atomic.Uint64
+	syncedVersion      atomic.Uint64
+	auths              map[string]*Auth
+	authEpochs         map[string]uint64
+	authChangeWatchers map[string]map[chan struct{}]struct{}
+	scheduler          *authScheduler
 	// pluginScheduler runs outside m.mu before falling back to native selection.
 	pluginScheduler PluginScheduler
 	// homeRuntimeAuths retains legacy session auth lookups for non-execution callers.
