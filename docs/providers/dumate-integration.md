@@ -145,11 +145,13 @@ normally. No account switching happens mid-stream; retries use the shared manage
 | Model registration | `sdk/cliproxy/service_models.go` → `registry.GetDumateModels()` |
 | Model catalog | `internal/registry/models/models.json`, `GetDumateModels`, channel dispatch, static lookup |
 | Management provider list | `internal/api/handlers/management/provider_models.go` → `dumate` |
-| Credential upload | existing `POST /v8/management/auth-files` (accepts any provider **type**) + WebUI panel upload |
+| Credential upload | `POST /v8/management/credentials` (multipart) or legacy `POST /v0/management/auth-files`; panel **Upload File** |
 | Credential exporter | `dumate-creds.py` (repository root; not part of the Go module) |
+| Panel icon + label | `frontend/src/assets/icons/dumate.png`, `AUTH_FILE_ICONS.dumate`, `TYPE_COLORS.dumate`, `auth_files.filter_dumate` |
 | CLI login / management OAuth start | **not applicable** — no OAuth flow exists |
 | Refresh lead registration | **not applicable** — credential is static |
-| Quota probe/observation | **not applicable** — no source found; documented as unknown |
+| Quota tab / panel quota section | **not applicable** — no quota source found |
+| Manual-refresh action | **not applicable** — nothing to rotate |
 
 ## 9. Usage
 
@@ -167,15 +169,16 @@ path. Start the Dumate client and sign in first.
 ### 9.2 Upload
 
 ```bash
-curl -X POST "http://127.0.0.1:8317/v0/management/auth-files?name=dumate.json" \
+curl -X POST "http://127.0.0.1:8317/v8/management/credentials" \
   -H "Authorization: Bearer <management key>" \
-  -H "Content-Type: application/json" \
-  --data-binary @auths/dumate.json
+  -F "file=@auths/dumate.json"
 ```
 
-`/v0/management/auth-files` is the credential-upload route the management panel uses (the `/v8/management`
-group does not mount `auth-files`). Multipart upload of the same file is accepted as well. The auth-file
-watcher picks the file up immediately; no restart is required.
+`/v8/management/credentials` is the multipart upload route the management panel uses. The legacy
+`/v0/management/auth-files` route (`?name=...` raw JSON or multipart) also accepts the file. The auth-file
+watcher picks it up immediately; no restart is required.
+
+In the panel, use **Auth Files → Upload File** and select the exported JSON.
 
 The WebUI panel's file-upload control accepts the same file. Uploading a file whose `base_url`/`port` is
 stale makes requests fail until the client is restarted and the file re-exported.
@@ -221,7 +224,12 @@ Live evidence collected by running the freshly built server against a real Dumat
 | `POST /v1/chat/completions` (streaming) | 200; 19 SSE chunks, re-assembled `"streaming works"`, final chunk carries `usage` |
 | `POST /v1/messages` (Anthropic) | 200; `stop_reason=end_turn`, thinking block + `text="anthropic ok"`, `usage` reported |
 | `POST /v1/responses` | 200; `status=completed`, reasoning + text output |
-| Auth-file upload | file loads through the standard `auths/` watcher; provider/model registration follows |
+| `POST /v8/management/credentials` (multipart) | 200; credential listed with `provider=dumate`, 4 models appear without a restart |
+| `GET /v8/management/provider-models` | 200; `dumate` section with 4 models |
+| Panel (`frontend/`) in a real browser | Auth Files page renders the Dumate filter chip, card badge and icon in both light and dark themes |
+
+Frontend checks: `bun test tests/dumateProvider.test.ts`, `bun run type-check`, `bun run lint`, `bun run build`,
+plus the whole `bun test` suite (27 pre-existing failures, unchanged; the new suite adds 5 passing tests).
 
 ## 11. Unsupported / blocked / unverified
 
@@ -233,6 +241,7 @@ Live evidence collected by running the freshly built server against a real Dumat
 - **Tool calling**: not exercised in this session; the shared translator provides it, but no live proof.
 - **Multi-account**: one credential file describes one live client session; multiple concurrent clients on the
   same machine are not addressed.
-- **External management UI**: the WebUI panel lives in a separate repository
-  (`rizxfrog/Cli-Proxy-API-Management-Center`); backend routes are provider-agnostic and need no change, but
-  no dedicated Dumate upload form was added there.
+- **Panel quota/refresh affordances**: the panel shows the credential without a quota tab or a manual-refresh
+  action, matching the backend, which exposes neither for this provider.
+- **Release packaging**: the panel release is published from `rizxfrog/Cli-Proxy-API-Management-Center`; the
+  icon and labels here reach users only after that repository cuts a release.
