@@ -148,9 +148,13 @@ normally. No account switching happens mid-stream; retries use the shared manage
 | Credential upload | `POST /v8/management/credentials` (multipart) or legacy `POST /v0/management/auth-files`; panel **Upload File** |
 | Credential exporter | `dumate-creds.py` (repository root; not part of the Go module) |
 | Panel icon + label | `frontend/src/assets/icons/dumate.png`, `AUTH_FILE_ICONS.dumate`, `TYPE_COLORS.dumate`, `auth_files.filter_dumate` |
+| Quota probe | `internal/auth/dumate/console.go` + `auth_files_dumate_quota.go` → `GET /v8/management/dumate-quota` |
+| Console cookie source | decrypted from the client's own store (`console_store.go`); an explicit `console_cookie` in the credential overrides it |
+| Daily check-in | `internal/checkin/dumate.go`, registered in `checkin.Capabilities()` and `sdk/cliproxy/service_checkin.go` |
+| Panel quota tab | `src/features/quota/providers/dumate/*`, `dumateQuota.ts`, plus the four quota registries |
+| Panel check-in card | none — the panel renders one card per backend capability |
 | CLI login / management OAuth start | **not applicable** — no OAuth flow exists |
 | Refresh lead registration | **not applicable** — credential is static |
-| Quota tab / panel quota section | **not applicable** — no quota source found |
 | Manual-refresh action | **not applicable** — nothing to rotate |
 
 ## 9. Usage
@@ -226,10 +230,18 @@ Live evidence collected by running the freshly built server against a real Dumat
 | `POST /v1/responses` | 200; `status=completed`, reasoning + text output |
 | `POST /v8/management/credentials` (multipart) | 200; credential listed with `provider=dumate`, 4 models appear without a restart |
 | `GET /v8/management/provider-models` | 200; `dumate` section with 4 models |
-| Panel (`frontend/`) in a real browser | Auth Files page renders the Dumate filter chip, card badge and icon in both light and dark themes |
+| `GET /v8/management/dumate-quota` | 200 with the live wallet: `available_points=5520.00`, `subscription_points=4993.91`, `bonus_points=520.00`, `expires_at` set |
+| `GET /v8/management/automation/checkin/providers` | 200; `dumate` listed alongside `codearts`, `codebuddy-cn`, `trae` |
+| Panel (`frontend/`) in a real browser | Auth Files banner, Quota Management tab (live wallet rendered), and the Automatic check-in Dumate card in both light and dark themes |
 
-Frontend checks: `bun test tests/dumateProvider.test.ts`, `bun run type-check`, `bun run lint`, `bun run build`,
-plus the whole `bun test` suite (27 pre-existing failures, unchanged; the new suite adds 5 passing tests).
+Frontend checks: `bun test tests/dumateProvider.test.ts tests/dumateQuota.test.ts`, `bun run type-check`,
+`bun run lint`, `bun run build`, plus the whole `bun test` suite — the 27 failures are byte-identical to the
+pre-change baseline (verified by diffing the failure names), and the new suites add passing coverage.
+
+Backend checks: `gofmt`, `go build ./...`, and the focused packages
+(`internal/auth/dumate`, `internal/checkin`, `internal/api/handlers/management`, `internal/watcher/...`,
+`sdk/cliproxy`, `internal/registry`). `sdk/cliproxy` reported three timing-sensitive failures under a
+parallel multi-package run that pass in isolation and on a single-package run.
 
 ## 11. Unsupported / blocked / unverified
 
@@ -241,7 +253,98 @@ plus the whole `bun test` suite (27 pre-existing failures, unchanged; the new su
 - **Tool calling**: not exercised in this session; the shared translator provides it, but no live proof.
 - **Multi-account**: one credential file describes one live client session; multiple concurrent clients on the
   same machine are not addressed.
-- **Panel quota/refresh affordances**: the panel shows the credential without a quota tab or a manual-refresh
-  action, matching the backend, which exposes neither for this provider.
+- **Panel quota/refresh affordances**: the panel shows the points wallet as a quota tab; there is no
+  manual-refresh action, matching the backend, which registers no refresh lead for this provider.
+- **Live check-in claim not triggered**: the adapter is unit-tested for the issued / already-done / refused /
+  upstream-failure paths and its read call is live-verified, but no claim was executed against the real account
+  — today's bonus was already claimed, and enabling the provider would have meant rewriting the operator's
+  config to prove a code path the shared scheduler already covers for the other three providers.
+- **Quota bucket families**: only the plan and bonus families are summed. A third family (purchased top-ups)
+  has no observed sample, so it is not mapped; `available_points` would show the difference if one appears.
+- **Cookie store portability**: reading the client's own store assumes the proxy runs on the same host as the
+  client, which inference already requires. A deployment elsewhere must supply `console_cookie` explicitly.
 - **Release packaging**: the panel release is published from `rizxfrog/Cli-Proxy-API-Management-Center`; the
-  icon and labels here reach users only after that repository cuts a release.
+  quota tab and icon reach users only after that repository cuts a release.
+
+## 12. Points wallet (Quota Management)
+
+The wallet lives on `console.bce.baidu.com`, **not** on the client's local backend, so it needs the Baidu
+console session rather than the inference credential.
+
+### 12.1 Where the cookie comes from
+
+The client stores its cookie jar in `auth.json` (field `cookies`) encrypted with the raw 32-byte key in
+`.cookie-key`, as `base64(iv[12] ‖ tag[16] ‖ ciphertext)` under AES-256-GCM — the same layout
+`lib/crypto/cookie.js` implements. The proxy decrypts that store directly
+(`internal/auth/dumate/console_store.go`) instead of asking the operator to copy a live session cookie into a
+second file: the local client is already required for inference, and a re-login then takes effect on the next
+read without re-exporting. A credential may still carry `console_cookie` to override the store, which is the
+path for a deployment that does not run the client on the same host.
+
+The Go side must append the tag *after* the ciphertext (`crypto/cipher` convention), while the stored layout
+puts it before: the two orders are not interchangeable and mixing them fails authentication.
+
+Only unexpired `*.baidu.com` cookies are sent; a jar with no usable cookie is reported as an error rather than
+sent as an empty header.
+
+### 12.2 Endpoint
+
+```http
+GET /v8/management/dumate-quota?auth_index=<index>
+```
+
+```json
+{
+  "provider": "dumate",
+  "observed_at": "2026-11-07T15:03:59Z",
+  "available_points": "5520.00",
+  "used_points": "6.09",
+  "is_subscribed": true,
+  "throttled": false,
+  "throttle_reason": "",
+  "throttle_type": "",
+  "subscription_points": "4993.91",
+  "bonus_points": "520.00",
+  "expires_at": 1794653785
+}
+```
+
+Upstream contract (`GET /api/dumate/points/quota_overview?timezone=…&clientType=desktop&ignoreLoginBonus=true`)
+and its envelope are documented in `docs/reverse-note/dumate-oauth_CN.md` §21.
+
+Design notes:
+
+- Decimal strings are **passed through** in the console's own units; the handler never re-rounds the totals.
+- `subscription_points` sums the plan buckets and `bonus_points` sums every granted or event bucket. The
+  console's other package types (purchased top-ups) have no observed sample, so they are deliberately not
+  folded into a bucket: `available_points` remains the console's own total, which makes a new family visible
+  as a difference instead of silently landing in the wrong row.
+- `expires_at` is the soonest future expiry across active buckets. An inactive bucket never contributes.
+- The upstream origin is fixed by the client; credential metadata cannot redirect a privileged management read.
+- A credential whose cookie is unreadable returns a clear 400 rather than a fabricated zero balance.
+
+The panel renders these as Available / Plan / Bonus / Points used plus the expiry line, matching the app's own
+Settings → Points screen.
+
+## 13. Daily check-in
+
+```http
+GET  /api/dumate/points/loginBonusInfo   # read state
+POST /api/dumate/points/loginBonus       # claim (no body, no query)
+```
+
+The adapter (`internal/checkin/dumate.go`) reads the state first and only claims when the console does not
+already count today:
+
+- `hasIssued` is the console's own flag; `signInDays` covers a timezone disagreement between the scheduler's
+  business date and the console's day.
+- A claim that answers success-without-grant (`result:false`) is reported as `already_done`, not as a failure,
+  and is not retried blindly.
+- Upstream errors are reported as `failed` with the console's message; the credential never appears in the
+  message.
+- An unreadable cookie store is `blocked` with the read error as a warning, so the operator sees why.
+
+The provider is listed by `checkin.Capabilities()` and is **disabled by default**; the operator enables it and
+picks the timezone/window from the panel's Automatic check-in page. The panel needs no per-provider code: it
+renders one card per capability returned by
+`GET /v8/management/automation/checkin/providers`.

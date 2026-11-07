@@ -1171,3 +1171,110 @@ Cookie 中的 `BDUSS` 是百度账号 session，不是 IAM token。DuMate 通过
 3. 需要处理 CSRF token 和 cookie 刷新机制
 
 **最实际的方案**：参考 dumate2api，保持 DuMate 客户端在线，从日志提取运行时凭据。
+
+---
+
+## 21. 积分额度 / 每日签到接口（runtime-confirmed）
+
+来源：客户端前端 bundle `frontend/static/js/index.b36ba629.js`（`claimLoginBonus`、`points` 模块）+
+`%APPDATA%\qianfan-desktop-app\log\electron.log` 的 `[BceConsoleRequest][fe]` 行 +
+本地只读回放（2026-11-07）。
+
+### 21.1 公共约定
+
+- Host：`https://console.bce.baidu.com` —— **不在本地后端**（`dumate-main-server` 只代理
+  `/api/qianfanproxy/*` 推理）。积分/签到走 Electron 主进程的 `bceConsoleRequest`，直连百度云控制台。
+- 鉴权：**纯 Cookie 会话**，无 Bearer、无签名、无 CSRF 头；主进程先 `[Cookie] decrypt`（见 §19，
+  AES-256-GCM / `.cookie-key`）再把 cookie 注入请求。关键 cookie：
+  `BDUSS`、`BDUSS_BFESS`、`bce-sessionid`、`bce-session`、`bce-passport-stoken`、`bce-login-accountid`。
+- 响应信封统一为：
+
+  ```json
+  { "logId": "<uuid>", "code": 0, "message": "", "success": true, "result": <T> }
+  ```
+
+  `code == 0 && success == true` 为成功。HTTP 200 不代表业务成功，须看 `code`。
+
+### 21.2 积分额度（对应设置 → 积分明细）
+
+```http
+GET /api/dumate/points/quota_overview?timezone=Asia%2FShanghai&clientType=desktop&ignoreLoginBonus=true
+```
+
+实测 200（本机账号）：
+
+```json
+{"code":0,"success":true,"result":{
+  "isSubscribed": true,
+  "usedPoints": "6.09",
+  "modelThrottleInfo": {"throttled": false, "reason": "", "throttleType": ""},
+  "totalPoints": "5520.00",
+  "subscription": [{"packageId":"…","usedPoints":"6.09","totalPoints":"5000.00",
+                    "startDate":1794048985,"expireDate":1794653785,"pointsExpireDate":1794653785,
+                    "packageType":"plan_experience","source":"event_bonus","status":"active",
+                    "autoRenewStatus":"none","nextAutoRenewAt":0,"product":"dumate"}],
+  "incremental": [
+    {"packageId":"…","usedPoints":"0.00","totalPoints":"20.00",
+     "packageType":"event_bonus","source":"growth_plan_2026_bonus","status":"active"},
+    {"packageId":"…","usedPoints":"0.00","totalPoints":"500.00",
+     "packageType":"grant_point","source":"login_bonus","status":"active"}
+  ]}}
+```
+
+界面字段对应（截图 ↔ 接口）：
+
+| UI | 字段 | 依据 |
+| --- | --- | --- |
+| 可用积分 | `result.totalPoints` | runtime-confirmed |
+| 订阅积分 | `result.subscription[]` 汇总 | runtime-confirmed（`packageType=plan_experience`） |
+| 赠送积分 | `result.incremental[]` 汇总 | runtime-confirmed：截图 520 = 20（growth_plan_2026_bonus）+ 500（login_bonus） |
+| 增购积分 | 增购类 package（本账号为 0，未取到样本） | inferred |
+| 「将于 … 到期」 | `pointsExpireDate` / `expireDate`（Unix 秒） | runtime-confirmed |
+| 限流提示 | `modelThrottleInfo.throttled/reason/throttleType` | runtime-confirmed |
+
+注意：`ignoreLoginBonus=true` 时未领取的签到积分不计入 `totalPoints`；`timezone` 影响日界（客户端传
+`Asia/Taipei`，传 `Asia/Shanghai` 同样 200）。
+
+### 21.3 每日签到
+
+```http
+GET  /api/dumate/points/loginBonusInfo   # 查状态
+POST /api/dumate/points/loginBonus       # 领取（无请求体、无 query）
+```
+
+`loginBonusInfo` 实测 200：
+
+```json
+{"code":0,"success":true,"result":{
+  "totalTimes": 1, "totalPoints": 500, "hasIssued": true, "signInDays": ["2026-11-07"]}}
+```
+
+- `hasIssued` = 今日是否已领；`signInDays` = 已签到日期列表；`totalTimes/totalPoints` = 累计次数/累计积分。
+- `POST /api/dumate/points/loginBonus` 客户端调用记录（`electron.log`）：
+  `2026-11-07 18:56:11.419 POST … → statusCode=200 → {"code":0,"success":true,"result":true}`。
+- bundle 原文：`claimLoginBonus(){ … this.request({path:"/api/dumate/points/loginBonus", method:"POST"}) }`。
+- **领取是每日一次的状态变更操作**：本次分析只做了 GET，未触发 POST。当前 `hasIssued=true`（今日已领）。
+
+### 21.4 顺带逆出的相邻接口
+
+```http
+GET /api/dumate/points/records/usage?page=1&limit=50&startAt=<unix秒>&endAt=<unix秒>
+```
+→ `result.totalCount`、`result.consumedPoints`、`result.list[]`
+（`createdAt`/`pointsChange`/`expectedPointsChange`/`packageId`/`conversationId`/`conversationName`/`skillAPICode`/`skillAPICallCnt`/`reason`）
+
+```http
+GET  /api/dumate/activity/status?activity_id=growth_plan_2026&activity_version=2
+GET  /api/dumate/activity/growth-plan/page/status
+GET  /api/dumate/activity/growth-plan/draw/status?source=pc
+POST /api/dumate/activity/join
+```
+活动 id 见过：`growth_plan_2026`、`self_media_competition_2026`、`coffee_2026`。
+
+### 21.5 结论与限制
+
+- 积分与签到接口**均可复现**，但依赖有效期内的百度控制台 Cookie 会话（`BDUSS` 等）。Cookie 失效即失效，
+  无法用推理用的 IAM token 替代（§20 结论一致）。
+- 想要「自动签到」= 持有 cookie 后每日 `POST /api/dumate/points/loginBonus`；`hasIssued` 可用于幂等判断，
+  避免重复请求。注意这属于对百度云控制台的自动化调用，需自行评估风控/条款风险。
+- 只读探针脚本：`E:/a/cpa-tests/1/dumate-points-probe.mjs`（运行时解密 cookie，只发 GET，不回显密钥）。

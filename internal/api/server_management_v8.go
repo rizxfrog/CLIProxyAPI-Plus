@@ -57,6 +57,7 @@ func (s *Server) registerManagementV8Routes() {
 	v8.GET("/qoder-cn-quota", s.mgmt.GetQoderCNQuota)
 	v8.GET("/qoder-ai-quota", s.mgmt.GetQoderCNQuota)
 	v8.GET("/minimax-quota", s.mgmt.GetMinimaxQuota)
+	v8.GET("/dumate-quota", s.mgmt.GetDumateQuota)
 
 	v8.GET("/observability/logs", s.mgmt.GetLogs)
 	v8.DELETE("/observability/logs", s.mgmt.DeleteLogs)

@@ -11,7 +11,8 @@ func (s *Service) initCheckinService() *checkin.Service {
 			source = s.coreManager
 		}
 		s.checkinService = checkin.NewService(source,
-			checkin.NewCodeArtsAdapter(), checkin.NewCodeBuddyAdapter(), checkin.NewTraeAdapter())
+			checkin.NewCodeArtsAdapter(), checkin.NewCodeBuddyAdapter(),
+			checkin.NewDumateAdapter(), checkin.NewTraeAdapter())
 	}
 	return s.checkinService
 }

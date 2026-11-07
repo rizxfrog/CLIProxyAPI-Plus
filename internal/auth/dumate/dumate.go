@@ -57,6 +57,12 @@ const (
 	FieldAccountID = "account_id"
 	FieldDeviceID  = "device_id"
 	FieldInappKey  = "inapp_key"
+	// FieldConsoleCookie carries the decrypted Baidu Cloud console session
+	// cookie ("name=value; ..."). It authorizes the points wallet and the daily
+	// sign-in bonus, which live on console.bce.baidu.com rather than on the
+	// client's local backend. Without it those calls fail with a missing-cookie
+	// error instead of silently reporting zeros.
+	FieldConsoleCookie = "console_cookie"
 )
 
 // MetadataString returns a trimmed string field from an auth metadata map.
@@ -134,4 +140,12 @@ func RuntimeHeaders(metadata map[string]any) map[string]string {
 		return nil
 	}
 	return headers
+}
+
+// ConsoleCookie returns the stored Baidu Cloud console cookie for a credential.
+//
+// The value is read from auth metadata because it is a secret: it must never be
+// copied into attributes, which are surfaced by listing endpoints.
+func ConsoleCookie(metadata map[string]any) string {
+	return MetadataString(metadata, FieldConsoleCookie)
 }

@@ -10,6 +10,7 @@ func Capabilities() []Capability {
 	providers := []struct{ id, name string }{
 		{"codearts", "CodeArts"},
 		{"codebuddy-cn", "WorkBuddy (CodeBuddy CN)"},
+		{"dumate", "Dumate"},
 		{"trae", "Trae"},
 	}
 	result := make([]Capability, 0, len(providers))
