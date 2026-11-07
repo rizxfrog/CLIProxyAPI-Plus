@@ -34,6 +34,7 @@ func newAuthManager() *sdkAuth.Manager {
 		sdkAuth.NewFloatboatAuthenticator(),
 		sdkAuth.NewLobsteraiServerAuthenticator(),
 		sdkAuth.NewLoomyAuthenticator(),
+		sdkAuth.NewAirJellyAuthenticator(),
 	)
 	return manager
 }

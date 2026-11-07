@@ -98,4 +98,7 @@ const (
 	// business gateway at loomyad.xunfei.cn. Its session has no refresh
 	// counterpart; refresh only probes liveness.
 	Loomy = "loomy"
+
+	// AirJelly uses a Supabase session and a signed OpenAI-style gateway.
+	AirJelly = "airjelly"
 )

@@ -121,6 +121,14 @@ func GetLobsteraiServerModels() []*ModelInfo {
 	return cloneModelInfos(getModels().LobsteraiServer)
 }
 
+// GetAirJellyModels publishes only the Lite tier verified on a Free account.
+func GetAirJellyModels() []*ModelInfo {
+	return []*ModelInfo{{
+		ID: "airjelly-lite", Object: "model", Type: "openai", OwnedBy: "airjelly",
+		DisplayName: "AirJelly Lite", ContextLength: 1048576, MaxCompletionTokens: 262144,
+	}}
+}
+
 // GetCodeBuddyCNModels returns the standard CodeBuddy CN (Tencent) model definitions.
 func GetCodeBuddyCNModels() []*ModelInfo {
 	return cloneModelInfos(getModels().CodeBuddyCN)
@@ -1242,6 +1250,8 @@ func GetStaticModelDefinitionsByChannel(channel string) []*ModelInfo {
 		return GetXiaohuanxiongModels()
 	case constant.Loomy:
 		return GetLoomyModels()
+	case constant.AirJelly:
+		return GetAirJellyModels()
 	case constant.CodeArts:
 		return GetCodeArtsModels()
 	case constant.QoderCN:
@@ -1338,6 +1348,7 @@ func LookupStaticModelInfo(modelID string) *ModelInfo {
 		// (for example MiniMax-M3) with different capacities, and provider-aware
 		// lookups reach it through LookupStaticModelInfoByChannel.
 		data.Loomy,
+		GetAirJellyModels(),
 	}
 	for _, models := range allModels {
 		for _, m := range models {
