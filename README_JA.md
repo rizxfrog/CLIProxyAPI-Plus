@@ -23,6 +23,7 @@ CLI のサブスクリプションアカウント（Codex / Claude / Gemini / Gr
 | CodeBuddy 国際版 | `codebuddy-ai` | OAuth / API Key | `--codebuddy-ai-login` または `codebuddy-ai-api-key`（ゲートウェイ `www.codebuddy.ai`） |
 | Devin | `devin` | OAuth | `--devin-login` |
 | TRAE SOLO CN | `trae` | デスクトップクライアント資格情報 | `trae-api-key` を設定。ログインは管理パネルから開始 |
+| 百度搭子 | dumate | デスクトップ用の認証情報 | WindowsにDumateをインストールしてログインした後、スクリプトdumate-creds.pyでログイン認証情報のJSONをエクスポートします。dumateには現在適切なOAuthがありません |
 | DeepSeek Web | `deepseek-web` | ブラウザセッション | `deepseek-web-api-key` を設定（chat.deepseek.com から userToken をコピー） |
 | Qwen Web | `qwen-web` | Web ログイン | 管理パネルの Web ログイン経由で接続 |
 | OpenAI 互換 | `openai-compatibility` | API Key | 任意の OpenAI 互換エンドポイント。`openai-compatibility` を設定 |

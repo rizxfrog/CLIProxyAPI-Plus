@@ -23,6 +23,7 @@ Management frontend repository: [Cli-Proxy-API-Management-Center](https://github
 | CodeBuddy International | `codebuddy-ai` | OAuth / API Key | `--codebuddy-ai-login` or `codebuddy-ai-api-key` (gateway `www.codebuddy.ai`) |
 | Devin | `devin` | OAuth | `--devin-login` |
 | TRAE SOLO CN | `trae` | Desktop client credential | Configure `trae-api-key`; sign-in is initiated from the management panel |
+| DuMate | `dumate` | Desktop client credential | install Dumate on windows and login it, use dumate-creds.py to export the json。i haven't find a fittable OAuth for dumate |
 | DeepSeek Web | `deepseek-web` | Browser session | Configure `deepseek-web-api-key` (copy the userToken from chat.deepseek.com) |
 | Qwen Web | `qwen-web` | Web login | Connected through the management panel Web login |
 | OpenAI Compatible | `openai-compatibility` | API Key | Any OpenAI-compatible endpoint; configure `openai-compatibility` |

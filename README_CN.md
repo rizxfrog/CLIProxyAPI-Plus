@@ -23,6 +23,7 @@
 | CodeBuddy 国际版 | `codebuddy-ai` | OAuth / API Key | `--codebuddy-ai-login` 或 `codebuddy-ai-api-key`（网关 `www.codebuddy.ai`） |
 | Devin | `devin` | OAuth | `--devin-login` |
 | TRAE SOLO CN | `trae` | 桌面端凭据 | 配置 `trae-api-key`；登录通过管理面板发起 |
+| 百度搭子 | `dumate` | 桌面端凭据 | 在Windows上安装Dumate并登录后，用脚本dumate-creds.py导出登录凭证json。dumate目前没有合适的OAuth |
 | DeepSeek Web | `deepseek-web` | 浏览器会话 | 配置 `deepseek-web-api-key`（从 chat.deepseek.com 复制 userToken） |
 | Qwen Web | `qwen-web` | 网页登录 | 通过管理面板 Web 登录接入 |
 | OpenAI 兼容 | `openai-compatibility` | API Key | 任意 OpenAI 兼容端点，配置 `openai-compatibility` |
