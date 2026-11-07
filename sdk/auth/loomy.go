@@ -99,7 +99,7 @@ func loomyAuthRecord(cfg *config.Config, token *loomyauth.TokenData) *coreauth.A
 
 // loomyAuthRecordWithBase builds a record against an explicit business origin.
 // It exists so self-hosted deployments and tests can target another host.
-func loomyAuthRecordWithBase(_ *config.Config, token *loomyauth.TokenData, baseURL string) *coreauth.Auth {
+func loomyAuthRecordWithBase(cfg *config.Config, token *loomyauth.TokenData, baseURL string) *coreauth.Auth {
 	now := time.Now()
 	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if base == "" {
@@ -116,6 +116,13 @@ func loomyAuthRecordWithBase(_ *config.Config, token *loomyauth.TokenData, baseU
 		"expired":      expired,
 		"timestamp":    now.UnixMilli(),
 	}
+	// Forced model prefixes are an access rule. Persist the provider prefix so
+	// newly logged-in accounts can actually serve their advertised models.
+	prefix := ""
+	if cfg != nil && cfg.ForceModelPrefix {
+		prefix = constant.Loomy
+		metadata["prefix"] = prefix
+	}
 	if token.Phone != "" {
 		metadata["phone"] = token.Phone
 	}
@@ -131,6 +138,7 @@ func loomyAuthRecordWithBase(_ *config.Config, token *loomyauth.TokenData, baseU
 		Provider: constant.Loomy,
 		FileName: fileName,
 		Label:    label,
+		Prefix:   prefix,
 		Metadata: metadata,
 		Attributes: map[string]string{
 			coreauth.AttributeAuthKind: coreauth.AuthKindOAuth,

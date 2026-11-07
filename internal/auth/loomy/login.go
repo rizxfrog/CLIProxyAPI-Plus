@@ -427,7 +427,7 @@ func (c *Client) WeChatBindCheckCode(ctx context.Context, rcode, code, msgID str
 // The filter is `type == "chat"`. Input modalities are not a filter: several
 // chat models accept images, which does not make them image-generation models.
 func (c *Client) FetchModels(ctx context.Context, session string) ([]Model, error) {
-	data, err := c.BusinessGET(ctx, session, "/models")
+	data, err := c.fetchModelList(ctx, session)
 	if err != nil {
 		return nil, err
 	}
@@ -450,6 +450,50 @@ func (c *Client) FetchModels(ctx context.Context, session string) ([]Model, erro
 		models = append(models, model)
 	}
 	return models, nil
+}
+
+// fetchModelList accepts both the business envelope used by older gateways and
+// the OpenAI-style {object:"list",data:[...]} response used by the current one.
+func (c *Client) fetchModelList(ctx context.Context, session string) (json.RawMessage, error) {
+	if strings.TrimSpace(session) == "" {
+		return nil, &Error{StatusCode: http.StatusUnauthorized, Message: "loomy session is empty"}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.APIBaseURL()+"/models", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("token", session)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, &Error{Message: err.Error()}
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return nil, &Error{StatusCode: resp.StatusCode, Message: err.Error()}
+	}
+	var wrapper struct {
+		Code *string         `json:"code"`
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &wrapper); err != nil {
+		return nil, &Error{StatusCode: resp.StatusCode, Message: "model list is not a JSON object"}
+	}
+	if wrapper.Code != nil {
+		env, err := ParseEnvelope(raw)
+		if err != nil {
+			return nil, err
+		}
+		return env.Data, nil
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, &Error{StatusCode: resp.StatusCode, Message: "model list request failed"}
+	}
+	if len(wrapper.Data) == 0 || string(wrapper.Data) == "null" {
+		return nil, &Error{StatusCode: resp.StatusCode, Message: "model list has no data"}
+	}
+	return wrapper.Data, nil
 }
 
 // modelFromRow maps one catalogue row, reporting false for non-chat entries.
