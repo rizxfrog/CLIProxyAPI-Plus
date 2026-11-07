@@ -211,6 +211,11 @@ func (s *Service) registerModelsForAuthWithConfigAndCache(ctx context.Context, c
 		models = applyExcludedModels(models, excluded)
 	case constant.AirJelly:
 		models = applyExcludedModels(registry.GetAirJellyModels(), excluded)
+	case constant.Dumate:
+		// The Dumate client's local backend exposes no model-list endpoint, so
+		// the embedded catalog is authoritative for this provider.
+		models = registry.GetDumateModels()
+		models = applyExcludedModels(models, excluded)
 	case "codebuddy-cn":
 		models = registry.GetCodeBuddyCNModels()
 		if entry := s.resolveConfigCodeBuddyCNKey(a); entry != nil {

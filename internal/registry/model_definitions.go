@@ -56,6 +56,7 @@ type staticModelsJSON struct {
 	Xiaohuanxiong   []*ModelInfo `json:"xiaohuanxiong"`
 	CodeArts        []*ModelInfo `json:"codearts"`
 	Loomy           []*ModelInfo `json:"loomy"`
+	Dumate          []*ModelInfo `json:"dumate"`
 }
 
 // GetClaudeModels returns the standard Claude model definitions.
@@ -1252,6 +1253,8 @@ func GetStaticModelDefinitionsByChannel(channel string) []*ModelInfo {
 		return GetLoomyModels()
 	case constant.AirJelly:
 		return GetAirJellyModels()
+	case constant.Dumate:
+		return GetDumateModels()
 	case constant.CodeArts:
 		return GetCodeArtsModels()
 	case constant.QoderCN:
@@ -1318,6 +1321,17 @@ func GetLoomyModels() []*ModelInfo {
 	return cloneModelInfos(getModels().Loomy)
 }
 
+// GetDumateModels returns the Dumate (百度搭子) desktop client catalog.
+//
+// The client's local backend exposes no model-list endpoint (GET
+// /api/qianfanproxy/v1/models returns 404), so the catalog is static. The IDs
+// were confirmed by issuing chat completions against a running client; each
+// resolves to a vendor model reported in the X-Dumate-Gw-Realmodel response
+// header. Availability is account/plan dependent.
+func GetDumateModels() []*ModelInfo {
+	return cloneModelInfos(getModels().Dumate)
+}
+
 // LookupStaticModelInfo searches all static model definitions for a model by ID.
 // Returns nil if no matching model is found.
 func LookupStaticModelInfo(modelID string) *ModelInfo {
@@ -1348,6 +1362,7 @@ func LookupStaticModelInfo(modelID string) *ModelInfo {
 		// (for example MiniMax-M3) with different capacities, and provider-aware
 		// lookups reach it through LookupStaticModelInfoByChannel.
 		data.Loomy,
+		data.Dumate,
 		GetAirJellyModels(),
 	}
 	for _, models := range allModels {

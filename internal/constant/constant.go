@@ -101,4 +101,13 @@ const (
 
 	// AirJelly uses a Supabase session and a signed OpenAI-style gateway.
 	AirJelly = "airjelly"
+
+	// Dumate represents Baidu Dumate (百度搭子) desktop client provider
+	// identifier. Dumate has no OAuth authorization server: the desktop app runs
+	// a local Go backend (dumate-main-server) that authenticates with a
+	// per-process in-app key plus the signed-in account id, and forwards OpenAI
+	// Chat Completions to dumate-svc.baidu.com. Credentials are supplied by
+	// uploading a credential JSON file exported from the running client, so this
+	// provider has no login flow and no token refresh.
+	Dumate = "dumate"
 )

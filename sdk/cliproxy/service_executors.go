@@ -335,6 +335,11 @@ func (s *Service) registerExecutorForAuth(a *coreauth.Auth, forceReplace bool) {
 		s.coreManager.RegisterExecutor(executor.NewLoomyExecutor(cfg))
 	case constant.AirJelly:
 		s.coreManager.RegisterExecutor(executor.NewAirJellyExecutor(cfg))
+	case constant.Dumate:
+		// Dumate's local backend speaks OpenAI Chat Completions, so the
+		// compatibility executor is the whole transport; the credential shape
+		// (base URL + X-Dumate-* headers) is applied by the file synthesizer.
+		s.coreManager.RegisterExecutor(executor.NewOpenAICompatExecutor(constant.Dumate, cfg))
 	case constant.Minimax:
 		s.coreManager.RegisterExecutor(executor.NewMinimaxExecutor(cfg))
 	case constant.MinimaxCN:

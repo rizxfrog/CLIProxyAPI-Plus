@@ -15,6 +15,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/auth/airjelly"
 	clineauth "github.com/router-for-me/CLIProxyAPI/v8/internal/auth/cline"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/auth/codex"
+	dumateauth "github.com/router-for-me/CLIProxyAPI/v8/internal/auth/dumate"
 	floatboatauth "github.com/router-for-me/CLIProxyAPI/v8/internal/auth/floatboat"
 	kimiauth "github.com/router-for-me/CLIProxyAPI/v8/internal/auth/kimi"
 	lobsteraiserverauth "github.com/router-for-me/CLIProxyAPI/v8/internal/auth/lobsteraiserver"
@@ -339,6 +340,23 @@ func synthesizeFileAuths(ctx *SynthesisContext, fullPath string, data []byte) ([
 			if value, _ := metadata[key].(string); value != "" {
 				a.Attributes[key] = value
 			}
+		}
+	}
+	if provider == constant.Dumate {
+		// Dumate has no OAuth flow: the operator uploads a credential file
+		// exported from the running desktop client. The credential is static and
+		// has no refresh counterpart, and no refresh lead is registered for this
+		// provider, so the auto-refresh loop never schedules it. The shared
+		// file-synthesizer convention still records auth_kind=oauth for every
+		// file credential, which keeps global oauth-excluded-models rules active.
+		if baseURL := dumateauth.ResolveBaseURL(metadata); baseURL != "" {
+			a.Attributes["base_url"] = baseURL
+		}
+		a.Attributes["api_key"] = dumateauth.ResolveAPIKey(metadata)
+		// The X-Dumate-* headers carry the real authorization. User-supplied
+		// headers applied later in this function still override these.
+		for name, value := range dumateauth.RuntimeHeaders(metadata) {
+			a.Attributes["header:"+name] = value
 		}
 	}
 	if provider == constant.LobsteraiServer {

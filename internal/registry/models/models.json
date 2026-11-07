@@ -15410,5 +15410,107 @@
         "text"
       ]
     }
+  ],
+  "dumate": [
+    {
+      "id": "glm-5",
+      "object": "model",
+      "created": 1759276800,
+      "owned_by": "baidu",
+      "type": "dumate",
+      "display_name": "GLM-5.2",
+      "description": "Dumate desktop client model; the client resolves it to upstream GLM-5.2 (X-Dumate-Gw-Realmodel). Reasoning is controlled with reasoning_effort.",
+      "thinking": {
+        "zero_allowed": true,
+        "levels": [
+          "none",
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "deepseek-v4-pro",
+      "object": "model",
+      "created": 1759276800,
+      "owned_by": "baidu",
+      "type": "dumate",
+      "display_name": "DeepSeek-V4 Pro",
+      "description": "Dumate desktop client model; resolves to upstream deepseek-v4-pro-0813. Reasoning is controlled with reasoning_effort.",
+      "thinking": {
+        "zero_allowed": true,
+        "levels": [
+          "none",
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "deepseek-v4-flash-0731",
+      "object": "model",
+      "created": 1759276800,
+      "owned_by": "baidu",
+      "type": "dumate",
+      "display_name": "DeepSeek-V4 Flash (0731)",
+      "description": "Dumate desktop client low-latency model; resolves to upstream deepseek-v4.1-flash-low-latency. Reasoning is controlled with reasoning_effort.",
+      "thinking": {
+        "zero_allowed": true,
+        "levels": [
+          "none",
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "deepseek-v41-flash",
+      "object": "model",
+      "created": 1759276800,
+      "owned_by": "baidu",
+      "type": "dumate",
+      "display_name": "DeepSeek-V4.1 Flash",
+      "description": "Dumate desktop client low-latency model; resolves to upstream deepseek-v4.1-flash-low-latency. Reasoning is controlled with reasoning_effort.",
+      "thinking": {
+        "zero_allowed": true,
+        "levels": [
+          "none",
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    }
   ]
 }

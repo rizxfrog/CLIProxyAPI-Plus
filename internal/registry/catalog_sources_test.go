@@ -165,6 +165,7 @@ func TestPublishCatalogBytesKeepsForkSections(t *testing.T) {
 			"xiaohuanxiong": len(data.Xiaohuanxiong),
 			"codearts":      len(data.CodeArts),
 			"loomy":         len(data.Loomy),
+			"dumate":        len(data.Dumate),
 		}
 	}
 
@@ -182,6 +183,7 @@ func TestPublishCatalogBytesKeepsForkSections(t *testing.T) {
 		Xiaohuanxiong: []*ModelInfo{{ID: "raccoon-chat-ml-5-5"}},
 		CodeArts:      []*ModelInfo{{ID: "GLM-5.2"}},
 		Loomy:         []*ModelInfo{{ID: "spark-x2.6"}},
+		Dumate:        []*ModelInfo{{ID: "glm-5"}},
 	}
 	install(t, current)
 
