@@ -3,14 +3,70 @@ package executor
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 
 	xiaohuanxiongauth "github.com/router-for-me/CLIProxyAPI/v8/internal/auth/xiaohuanxiong"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/constant"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
+	sdktranslator "github.com/router-for-me/CLIProxyAPI/v8/sdk/translator"
 	"github.com/tidwall/gjson"
 )
+
+func TestXiaohuanxiongExecutorUsesOAuthMetadataForChat(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		name := "nonstream"
+		if stream {
+			name = "stream"
+		}
+		t.Run(name, func(t *testing.T) {
+			calls := 0
+			ctx := context.WithValue(context.Background(), "cliproxy.roundtripper", roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+				calls++
+				if got := req.URL.String(); got != xiaohuanxiongauth.LLMBaseURL+"/chat/completions" {
+					t.Errorf("upstream URL = %q", got)
+				}
+				if got := req.Header.Get("Authorization"); got != "Bearer oauth-token" {
+					t.Errorf("Authorization = %q", got)
+				}
+				body := `{"id":"chatcmpl-1","object":"chat.completion","model":"glm-5-3","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`
+				contentType := "application/json"
+				if stream {
+					body = "data: " + `{"id":"chatcmpl-1","object":"chat.completion.chunk","model":"glm-5-3","choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":null}]}` + "\n\ndata: [DONE]\n\n"
+					contentType = "text/event-stream"
+				}
+				return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{contentType}}, Body: io.NopCloser(strings.NewReader(body))}, nil
+			}))
+			auth := &cliproxyauth.Auth{Provider: constant.Xiaohuanxiong, Metadata: map[string]any{"access_token": "oauth-token"}}
+			req := cliproxyexecutor.Request{Model: "glm-5-3", Payload: []byte(`{"model":"glm-5-3","messages":[{"role":"user","content":"hi"}]}`)}
+			opts := cliproxyexecutor.Options{SourceFormat: sdktranslator.FormatOpenAI, Stream: stream}
+			exec := NewXiaohuanxiongExecutor(&config.Config{})
+			if stream {
+				result, err := exec.ExecuteStream(ctx, auth, req, opts)
+				if err != nil {
+					t.Fatalf("ExecuteStream() error = %v", err)
+				}
+				for chunk := range result.Chunks {
+					if chunk.Err != nil {
+						t.Fatalf("stream chunk error = %v", chunk.Err)
+					}
+				}
+			} else if _, err := exec.Execute(ctx, auth, req, opts); err != nil {
+				t.Fatalf("Execute() error = %v", err)
+			}
+			if calls != 1 {
+				t.Fatalf("upstream requests = %d, want 1", calls)
+			}
+			if auth.Attributes != nil {
+				t.Fatal("executor mutated source auth")
+			}
+		})
+	}
+}
 
 // TestXiaohuanxiongExecutorIdentifier pins the provider key so the conductor's
 // registration switch keeps matching.
