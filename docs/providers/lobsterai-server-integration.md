@@ -126,16 +126,29 @@ const withKeyfromBody = (body) => ({ ...body, ...buildKeyfromPayload() });
 | 机制 | 含义 | 本实现 |
 | --- | --- | --- |
 | 用量记账 | 单次请求 token | 走共享 usage reporter（`helps.ParseClaudeUsage` / `ParseOpenAIUsage` + `StreamUsageBuffer`） |
-| 额度/积分观测 | 账号余额与签到活动状态 | `GET /api/user/quota`（`{code:0,data}`）+ 只读 activity slot/context |
+| 额度/积分观测 | 账号余额与签到活动状态 | `GET /api/user/quota` + `GET /api/user/profile-summary`（两个读，见下）+ 只读 activity slot/context |
 | 调度冷却 | 本地路由状态 | 保留上游 status/Retry-After，交给共享 manager（不混用） |
+
+**两个额度读必须分开报，不能互相代替（2026-11-09 实测修正）**：
 
 - `GET /api/user/quota`（**runtime-confirmed**）→ `data`：
   `{"subscriptionStatus":"free","planName":"免费","freeCreditsTotal":300,"freeCreditsRemaining":299.86,"freeCreditsUsed":0.14,"freeCreditsExpiresAt":"2026-10-29",…}`。
-  实现取 `freeCreditsRemaining` 为余额、`subscriptionStatus/planName` 为套餐；缺失则 `credits_known=false`（未知而非 0）。
+  这是**免费档额度桶**，也是客户端 `AuthIpcChannel.GetQuota` 用来做「低额度购买提示」闸门的那个读，**不是账号总额**。
+- `GET /api/user/profile-summary`（**runtime-confirmed**，本仓库新增读）→ `data`：
+  `{"id":123318,"nickname":"…","totalCreditsRemaining":200,"creditItems":[{"type":"campaign","label":"每日登录奖励","labelEn":"Daily Login Reward","creditsRemaining":100,"expiresAt":"2026-11-14T16:41:26"}, …]}`。
+  这是**账号总额 + 分桶明细**，也是客户端登录按钮/账号菜单渲染的那个读
+  （`LoginButton.tsx:575` `profileSummary.totalCreditsRemaining`、`:597` `profileSummary.creditItems`）。
+- **两者可以差到「一个读 0、另一个读 200」**。2026-11-09 对同一账号实测：
+  `quota.freeCreditsRemaining=0`（`freeCreditsExpired=true`）而 `profile-summary.totalCreditsRemaining=200`，
+  200 全部来自两笔 `campaign`「每日登录奖励」。只读前者的实现会把一个还有 200 积分的账号显示成 0。
+- 因此实现同时报两个读：`credits`（免费桶）与 `total_credits` + `credit_packages`（账号总额与明细），
+  各自带 `*_known` 标志；缺失就是 unknown，绝不填 0。
 - `GET /api/user/profile`（**runtime-confirmed**）→ `{"yid":"<登录邮箱>","nickname":"130****2189","id":123318}`；`id` 是**数字**、登录标识在 `yid`。
-- **签到机制存在**：`GET /api/client-activities/slot?placement=desktop_sidebar&clientVersion=<v>&containerApiVersion=2&platform=<os>` → `{slotState, activity:{activityCode, configRevision}}`；`GET /api/client-activities/{code}/context?configRevision=<n>` → 上下文。类型 `daily_check_in`（动作 `check_in`）/`one_time_credit_reward`（动作 `claim`）。错误码 `51100..51106`。**source-confirmed**（`activityClient.js`、`shared/activity/constants.js`；前端文案 `每日可领 {credits} 积分`、`登录领取每日积分礼`）。
-- **明确禁止自动执行活动动作**：签到是用户在桌面客户端里的动作，代理只观测、不代签（`FetchActivitySnapshot` 只读 slot+context）。管理端点 `GET /lobsterai-server-quota` 复用该只读逻辑。
-- 未知值诚实处理：`credits_known=false` / `activity_available=false`，绝不伪造成 0 或无限。
+- **签到机制存在**：`GET /api/client-activities/slot?placement=desktop_sidebar&clientVersion=<v>&containerApiVersion=2&platform=<os>` → `{slotState, activity:{activityCode, configRevision}}`；`GET /api/client-activities/{code}/context?configRevision=<n>` → 上下文。类型 `daily_check_in`（动作 `check_in`）/`one_time_credit_reward`（动作 `claim`）。错误码 `51100..51106`，其中 `51104` = 已领取。**source-confirmed**（`activityClient.js`、`shared/activity/constants.js`；前端文案 `每日可领 {credits} 积分`、`登录领取每日积分礼`）。
+- **签到默认不执行**：管理端点 `GET /lobsterai-server-quota` 只读复用 slot+context（`FetchActivitySnapshot`），没有任何控件能触发领取。
+  需要自动签到时**必须由运维显式启用** `internal/checkin` 的 `lobsterai-server` 适配器
+  （默认关闭，与 codearts / codebuddy-cn / dumate / trae 同一套调度框架），见 §10。
+- 未知值诚实处理：`credits_known=false` / `total_credits_known=false` / `activity_available=false`，绝不伪造成 0 或无限。
 
 ## 6. 错误
 
@@ -151,7 +164,8 @@ const withKeyfromBody = (body) => ({ ...body, ...buildKeyfromPayload() });
 | CLI 登录 | `internal/cmd/lobsterai_server_login.go` + `cmd/server/main.go` (`--lobsterai-server-login`) |
 | 嵌入式服务注册 | `sdk/cliproxy/service_auth.go` |
 | 管理 OAuth | `internal/api/handlers/management/auth_files_lobsterai_server.go` + 路由 + `oauth_sessions.go` 归一化 + `auth_files_v8.go` |
-| 管理配额 | `internal/api/handlers/management/auth_files_lobsterai_server_quota.go`（`GET /v0|/v8/management/lobsterai-server-quota`） |
+| 管理配额 | `internal/api/handlers/management/auth_files_lobsterai_server_quota.go`（`GET /v0|/v8/management/lobsterai-server-quota`，含 `total_credits` / `credit_packages` / 签到计数） |
+| 自动签到（可选） | `internal/checkin/lobsterai.go`（`NewLobsterAIAdapter`）+ `internal/checkin/capabilities.go` + `sdk/cliproxy/service_checkin.go`（默认关闭） |
 | 执行器 | `internal/runtime/executor/lobsterai_server_executor.go` + `lobsterai_server_helpers.go` |
 | 执行器绑定 | `sdk/cliproxy/service_executors.go` (`case constant.LobsteraiServer`) |
 | 模型目录探测 | `sdk/cliproxy/lobsterai_server_models.go` + `service_models.go` + `service_lifecycle.go` |
@@ -161,7 +175,7 @@ const withKeyfromBody = (body) => ({ ...body, ...buildKeyfromPayload() });
 | TUI | `internal/tui/oauth_tab.go` |
 | 管理面板前端 | `frontend/`（独立仓库，见 §7a） |
 
-注册清单（完整，逐项已实现）：CLI flag/dispatch、两个默认 auth manager、refresh lead、executor 绑定、模型注册 + 异步目录探测 + 生命周期 goroutine、synthesizer 再水合、v0+v8 路由、v8 dispatch、provider 归一化、`nativeModelProviders`、TUI 条目。
+注册清单（完整，逐项已实现）：CLI flag/dispatch、两个默认 auth manager、refresh lead、executor 绑定、模型注册 + 异步目录探测 + 生命周期 goroutine、synthesizer 再水合、v0+v8 路由、v8 dispatch、provider 归一化、`nativeModelProviders`、TUI 条目、`internal/checkin` 适配器（`lobsterai-server`，默认关闭）。
 
 ## 7a. 管理面板前端 (frontend/)
 
@@ -171,23 +185,41 @@ const withKeyfromBody = (body) => ({ ...body, ...buildKeyfromPayload() });
 | --- | --- |
 | 登录入口 | `src/pages/OAuthPage.tsx`（provider card + `CALLBACK_SUPPORTED` + `DEDICATED_CALLBACK_COPY`）；图标 `src/assets/icons/lobsterai.svg` |
 | OAuth provider 类型 | `src/services/api/oauth.ts` |
-| 额度 API | `src/services/api/lobsteraiServerQuota.ts`（`GET /lobsterai-server-quota`，`credits_known` 缺失即 unknown） |
+| 额度 API | `src/services/api/lobsteraiServerQuota.ts`（`GET /lobsterai-server-quota`；`credits_known` / `total_credits_known` 缺失即 unknown） |
 | 额度适配器 | `src/features/quota/providers/lobsteraiserver/data.ts` |
-| 额度渲染体 | `src/features/quota/providers/lobsteraiserver/LobsteraiServerQuotaBody.tsx`（积分 + 套餐 + 只读签到状态，无「领取」控件） |
-| 注册 | `providers/index.ts`、`providers/types.ts`（`QuotaProviderType`/`QuotaStore`）、`constants.ts`（`QUOTA_TAB_ORDER`）、`logic.ts`（`QUOTA_FILTER_MAP`）、`QuotaPage.tsx`、`stores/useQuotaStore.ts`、`utils/quota/validators.ts`、`types/quota.ts`（`LobsteraiServerQuotaState`）、`types/authFile.ts` |
-| i18n | 6 个 locale 的 `auth_login.lobsterai_server_*` 与 `lobsterai_server_quota.*` |
-| 测试 | `tests/lobsteraiServerQuota.test.ts`（payload 解析 / unknown 语义 / view model） |
+| 额度渲染体 | `src/features/quota/providers/lobsteraiserver/LobsteraiServerQuotaBody.tsx`（积分总额 + 分桶明细 + 套餐 + 只读签到状态，无「领取」控件） |
+| 注册 | `providers/index.ts`、`providers/types.ts`（`QuotaProviderType`/`QuotaStore`）、`constants.ts`（`QUOTA_TAB_ORDER`）、`logic.ts`（`QUOTA_FILTER_MAP`）、`QuotaPage.tsx`、`stores/useQuotaStore.ts`、`utils/quota/validators.ts`、`types/quota.ts`（`LobsteraiServerQuotaState` / `LobsteraiServerCreditPackage`）、`types/authFile.ts` |
+| i18n | 7 个 locale 的 `auth_login.lobsterai_server_*` 与 `lobsterai_server_quota.*`（26 键，逐 locale 键集校验一致） |
+| 测试 | `tests/lobsteraiServerQuota.test.ts`（payload 解析 / 两个读不可互换 / 分桶归一化 / unknown 语义 / view model） |
 
-前端验证：`bun run type-check` 通过；`bun run lint` 通过；`bun run build` 通过；`bun test` 中本 Provider 相关用例（`lobsteraiServerQuota`、`quotaAdapterContract`、`quotaPageLogic`）全部通过，全量 1744 通过 / 23 失败，失败数与干净 HEAD 完全一致（均为既有失败，非本改动引入）。
+卡片只读、不提供领取控件；免费桶仅在**实际持有**时占一行 —— 它常见形态是 0 且已过期（§5 实测），
+常驻一行 0 会让一个仍有钱的账号看起来是坏的。
+
+前端验证：`bun run type-check` 通过；`bun run lint` 通过；`bun test` 中本 Provider 相关用例
+（`lobsteraiServerQuota` 11 项、`quotaAdapterContract`、`quotaPageLogic`，共 38 项）全部通过。
+
+## 7b. 与 `dsh-our-free-model` 的对照
+
+同为 LobsterAI 渠道的另一实现（`dsh-our-free-model` 的 `channel-pack/src/lobsterai*`）可用作交叉校验；
+本仓库与其协议结论一致（端点、`X-LobsterAI-Client-Capabilities`、`stream:true` 强制、`keyfrom` 归属字段）。
+两处本仓库此前缺失、已按 §5 补齐：
+
+1. **额度读**：对方一直只用 `profile-summary`（其注释明确写了「`/api/user/quota` 只显示 freeCreditsTotal=300，不含活动积分」），本仓库此前只读 `quota`。
+2. **自动签到**：对方有 `auto-checkin.ts`（三步步进 + `idempotencyKey`）；本仓库此前只有只读观测与独立脚本。
+   差异是设计选择而非能力缺失：本仓库的签到走 `internal/checkin` 统一调度（默认关闭、可配时区/窗口），
+   而不是在每个渠道里自带一个签到循环。
 
 ## 8. 未确认 / 待实测
 
-1. **免费账号只覆盖 7 个模型**：付费/订阅账号的 `accessible` 集合不同（目录会返回更多 `accessible=true`），本实现按账号实时目录注册，未硬编码。
+1. **不同账号的模型集合不同**（付费/订阅账号的 `accessible` 集合更大）：本实现按账号实时目录注册，未硬编码。免费账号 2026-10-15 为 7 个、2026-11-09 为 19 个，随账号状态变化。
 2. `accessToken` 寿命：由 JWT `exp` 推导（本账号约 30 天，`exp-iat=2592000`），刷新链路已按 `refreshToken` 实现但**未在真实过期后实测**。
 3. 企业账号上下文头（`getEnterpriseAccountHeaders`）：**unknown**，本实现仅发送 token + 两个客户端头。
 4. `/messages` 的 40300 是否对**所有**账号生效（而非仅免费账号）：仅本账号实测。
 5. ~~签到活动接口返回 `slotState:empty`~~ **已解决并实测（2026-10-15）**：`slotState:empty` 是查询串里 `platform=cli` 造成的。后端把 `platform` 当作运行环境判别字段，只接受 `win32`/`darwin`/`linux`；非法值（如 `cli`）静默返回空槽位。修正为按 `runtime.GOOS` 发送真实平台后，管理端点实测 `activity_available:true`、`activity_code:daily-check-in-evergreen-prod-20260814`（见 §9 验证表）。
 6. 前缀/别名/排除等共享管线未做账号级实测（走的是既有通用代码路径）。
+7. **线上签到未真的执行过**：适配器只做了单测（含「已签不重发」与 `51104` 路径），
+   真实账号的领取动作**本次未触发** —— 配额读取已 live 验证，但一次真实 `check_in` 会把该账号当天的
+   100 积分领掉，属于不可回退的状态变更，需要明确授权后再做。
 
 ## 9. 验证状态 (Verification)
 
@@ -208,13 +240,32 @@ const withKeyfromBody = (body) => ({ ...body, ...buildKeyfromPayload() });
 | ├ 计数 token | `POST /v1/messages/count_tokens` → `{"input_tokens":8}` |
 | ├ in-band 错误 | 不可见模型/不存在模型 → 400 `model_not_found`；上游 `40300/40301` 已映射为真实状态 |
 | └ 管理额度 | `/v0|/v8/management/lobsterai-server-quota` → `credits=299, credits_known=true`, `activity_available=true`（2026-10-15 修正 `platform` 后实测） |
+| 额度两个读的差异 | **live 实测（2026-11-09）**：同一账号 `quota.freeCreditsRemaining=0`（`freeCreditsExpired=true`、`freeCreditsTotal=300`）而 `profile-summary.totalCreditsRemaining=200`，200 全部来自两笔 `campaign`「每日登录奖励」。只读 `quota` 会把该账号显示成 0 —— 这就是本次修正的动机 |
+| `FetchCreditSummary` 解析 | **live 实测**：`total=200 known=true user="123318"`；`packages=2` 均为 `type=campaign / label=每日登录奖励 / label_en=Daily Login Reward`，`remaining` 各 100，`expires` 分别为 `2026-11-14T16:41:26`、`2026-11-15T00:44:15`；分桶合计 200 与总额一致 |
+| 模型目录（2026-11-09 复测） | 19 个 `accessible=true`（含 `kimi-k3`），全部 `apiFormat=openai`，`contextWindow` 256k–1M |
+| 签到适配器 | 单测 11 项：已签→`already_done` 且**不重发 POST**、可签→`success` 且断言 `configRevision`/`idempotencyKey`/空 `payload`、`51104`→`already_done`、`completed`→`already_done`、空槽位→`unavailable`、业务错误码→`failed`（消息带码）、缺凭据/异 provider→`blocked`、Identity、capability 登记 |
 | 签到脚本 | `docs/scripts/lobsterai_server_checkin.py` 实测签到成功：`creditsGranted=100`，`periodKey=2026-10-15`；重跑返回「今日已签到」不重复领取；`profile-summary` 新增 `每日登录奖励 +100.0` |
 | 已知与本改动无关的失败 | `sdk/cliproxy` 的 `TestRegisterModelsForAuthCodeBuddyCNOAuthIgnoresAPIKeyModels` 在干净 HEAD 上即失败（已用 stash 复现），非本改动引入 |
 
-## 10. 签到脚本 (docs/scripts/lobsterai_server_checkin.py)
+## 10. 自动签到 (两条路径)
 
-签到动作（`POST /api/client-activities/{code}/actions/{actionId}`）在桌面端是**用户动作**，
-代理内置路径保持只读（`FetchActivitySnapshot` 永不执行动作）。需要自动签到时用该独立脚本：
+签到动作（`POST /api/client-activities/{code}/actions/{actionId}`）默认**不由代理执行**：
+管理端点与执行器都只读（`FetchActivitySnapshot` 永不执行动作）。需要自动签到时有两条路径：
+
+### 10a. 内置调度器（推荐）
+
+`internal/checkin` 的 `lobsterai-server` 适配器复用本仓库统一的签到框架（与 codearts /
+codebuddy-cn / dumate / trae 同一套调度器），**默认关闭**，由运维在管理面板的
+「自动签到」页显式启用并设置时区/窗口：
+
+- 先读 slot + context，`claimedToday` / `completed` / 业务码 `51104` 均映射为 `already_done`，
+  **不会重复 POST**；
+- 槽位未开放或活动未暴露动作 → `unavailable`；上游错误 → `failed`（消息带业务码）；
+- 凭据缺失 → `blocked`（`credential_unavailable`），不伪装成成功；
+- `platform` 按运行主机发送（`win32`/`darwin`/`linux`），**不可用 `cli`**（见 §8.5）；
+- 幂等键 `cli-<毫秒>-<随机 8 字节 hex>`，满足 `^[A-Za-z0-9._:-]{1,64}$`。
+
+### 10b. 独立脚本（无调度器时的替代）
 
 ```bash
 python3 docs/scripts/lobsterai_server_checkin.py status        --auth-file data/auth_files/lobsterai-server-123318.json  # 只读
@@ -231,5 +282,9 @@ python3 docs/scripts/lobsterai_server_checkin.py --auth-dir data/auth_files --pr
 ## 11. 运行时语义说明 (Operational notes)
 
 - **静态目录为空是刻意的**：后端 `/api/models/available` 才是权威来源，任意写死模型清单会为无权限账号暴露不可用模型。首个探测完成后模型才可见。
-- **签到不代签**：`/lobsterai-server-quota` 只读签到状态。本地额度重置（`ResetQuota`）只清路由/冷却，不重置上游订阅或积分。
+- **签到只由显式启用的调度器执行**：管理端点与执行器都只读；需要自动签到时启用
+  `internal/checkin` 的 `lobsterai-server` 适配器（默认关闭），或使用 §10b 的独立脚本。
+- **额度卡展示两个读**：免费桶（`credits`）与账号总额（`total_credits` + `credit_packages`）分列，
+  建成一个数字会把「免费档已用完但活动积分仍在」的账号显示成 0（§5）。
+- **本地额度重置只清本地状态**：`ResetQuota` 清路由/冷却，不重置上游订阅或积分。
 - **provider key 与 wire format 解耦**：`lobsterai-server` 复用 OpenAI/Codex/Claude 三套 translator，不新增公共路由、不伪装成 codex。

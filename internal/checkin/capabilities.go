@@ -11,6 +11,7 @@ func Capabilities() []Capability {
 		{"codearts", "CodeArts"},
 		{"codebuddy-cn", "WorkBuddy (CodeBuddy CN)"},
 		{"dumate", "Dumate"},
+		{"lobsterai-server", "LobsterAI (NetEase/Youdao)"},
 		{"trae", "Trae"},
 	}
 	result := make([]Capability, 0, len(providers))

@@ -15,26 +15,42 @@ import (
 // credential, shaped for the management console quota page.
 //
 // The numbers come from the account backend's own reads
-// (GET /api/user/quota and the client-activities slot/context). They are
-// deliberately kept separate from:
+// (GET /api/user/quota, GET /api/user/profile-summary and the client-activities
+// slot/context). They are deliberately kept separate from:
 //
 //   - scheduler cooldown, which is local routing state, not an account balance;
 //   - usage accounting, which counts tokens for a single request.
 //
-// The daily check-in activity is reported as observed state only. CLIProxyAPI
-// never claims the reward on the account's behalf: check-in is a user action in
-// the desktop client. An unknown value is reported as absent
-// (CreditsKnown=false / ActivityAvailable=false) rather than as zero or
-// unlimited.
+// Two credit reads are reported side by side on purpose. Credits is the
+// free-tier bucket that GET /api/user/quota exposes and that the client's
+// low-credit purchase gate watches. TotalCredits is the account total from
+// GET /api/user/profile-summary, which is what the client's own account menu
+// renders (profileSummary.totalCreditsRemaining / creditItems). Reporting only
+// the former understates any account that also holds activity or daily-login
+// grants, so neither read is allowed to stand in for the other.
+//
+// The daily check-in activity is reported as observed state only here. Claiming
+// it is a separate, opt-in action that only the check-in scheduler performs when
+// an operator explicitly enables the provider for this credential; this endpoint
+// never claims anything. An unknown value is reported as absent
+// (CreditsKnown=false / TotalCreditsKnown=false / ActivityAvailable=false)
+// rather than as zero or unlimited.
 type LobsteraiServerQuota struct {
 	// SubscriptionStatus is the raw plan/status string (e.g. "free", "active").
 	SubscriptionStatus string `json:"subscription_status,omitempty"`
-	// Credits is the remaining credit balance when the backend reports one.
+	// Credits is the remaining free-tier credit balance when the backend reports one.
 	Credits int64 `json:"credits"`
 	// CreditsKnown reports whether Credits was present; false means unknown, not 0.
 	CreditsKnown bool `json:"credits_known"`
 	// PurchasedCredits is a separate credit bucket when the plan carries one.
 	PurchasedCredits int64 `json:"purchased_credits,omitempty"`
+
+	// TotalCredits is the account's own credit total from profile-summary.
+	TotalCredits float64 `json:"total_credits"`
+	// TotalCreditsKnown reports whether TotalCredits was present.
+	TotalCreditsKnown bool `json:"total_credits_known"`
+	// CreditPackages is the per-bucket breakdown behind TotalCredits.
+	CreditPackages []LobsteraiServerCreditPackage `json:"credit_packages,omitempty"`
 
 	// ActivityAvailable reports whether a check-in/credit activity slot is open.
 	ActivityAvailable bool `json:"activity_available"`
@@ -46,6 +62,25 @@ type LobsteraiServerQuota struct {
 	ActivityPlacement string `json:"activity_placement,omitempty"`
 	// ActivityContext is the raw read-only activity context payload, if any.
 	ActivityContext map[string]any `json:"activity_context,omitempty"`
+	// ClaimedToday mirrors the activity's own "already claimed today" flag.
+	ClaimedToday bool `json:"claimed_today,omitempty"`
+	// ClaimedDays and ClaimedCredits are the activity's own running counters.
+	ClaimedDays    int64   `json:"claimed_days,omitempty"`
+	ClaimedCredits float64 `json:"claimed_credits,omitempty"`
+}
+
+// LobsteraiServerCreditPackage is one credit bucket behind the account total.
+type LobsteraiServerCreditPackage struct {
+	// Type is the machine group code (e.g. "subscription", "bonus").
+	Type string `json:"type,omitempty"`
+	// Label is the localized bucket name the client shows.
+	Label string `json:"label,omitempty"`
+	// LabelEn is the bucket's English name when the backend provides one.
+	LabelEn string `json:"label_en,omitempty"`
+	// CreditsRemaining is the remaining amount in this bucket.
+	CreditsRemaining float64 `json:"credits_remaining"`
+	// ExpiresAt is the backend's own expiry string, empty when it never expires.
+	ExpiresAt string `json:"expires_at,omitempty"`
 }
 
 // GetLobsteraiServerQuota returns the read-only credit/plan view for one
@@ -83,6 +118,26 @@ func (h *Handler) GetLobsteraiServerQuota(c *gin.Context) {
 		CreditsKnown:       quota.CreditsKnown,
 		PurchasedCredits:   quota.PurchasedCredits,
 	}
+	// The credit summary is best-effort like the activity read below: a failure
+	// there must not hide the free-tier balance, and an absent total stays
+	// explicitly unknown instead of becoming a zero.
+	if summary, errSummary := client.FetchCreditSummary(c.Request.Context(), accessToken); errSummary == nil && summary != nil {
+		out.TotalCredits = summary.TotalCreditsRemaining
+		out.TotalCreditsKnown = summary.TotalKnown
+		if len(summary.Packages) > 0 {
+			packages := make([]LobsteraiServerCreditPackage, 0, len(summary.Packages))
+			for _, item := range summary.Packages {
+				packages = append(packages, LobsteraiServerCreditPackage{
+					Type:             item.Type,
+					Label:            item.Label,
+					LabelEn:          item.LabelEn,
+					CreditsRemaining: item.CreditsRemaining,
+					ExpiresAt:        item.ExpiresAt,
+				})
+			}
+			out.CreditPackages = packages
+		}
+	}
 	// The activity snapshot is best-effort: an unavailable activity must not
 	// fail the whole quota read.
 	if snapshot, errActivity := client.FetchActivitySnapshot(
@@ -92,9 +147,12 @@ func (h *Handler) GetLobsteraiServerQuota(c *gin.Context) {
 		lobsteraiserverauth.ActivityContainerAPIVersionDailyCheckIn,
 	); errActivity == nil && snapshot != nil {
 		out.ActivityPlacement = snapshot.Placement
-		out.ActivityAvailable = snapshot.SlotState == "available" && snapshot.ActivityCode != ""
+		out.ActivityAvailable = snapshot.Available()
 		out.ActivityCode = snapshot.ActivityCode
 		out.ActivityContext = snapshot.Context
+		out.ClaimedToday = snapshot.ClaimedToday()
+		out.ClaimedDays = snapshot.ClaimedDays()
+		out.ClaimedCredits = snapshot.ClaimedCredits()
 		if snapshot.Context != nil {
 			out.ActivityTemplate = lobsteraiServerQuotaString(snapshot.Context, "template", "activityTemplate")
 		}

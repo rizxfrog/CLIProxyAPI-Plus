@@ -32,7 +32,10 @@ package lobsteraiserver
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -143,12 +146,13 @@ type Model struct {
 
 // Endpoints groups the backend paths used during login, refresh and reads.
 type Endpoints struct {
-	Exchange     string
-	Refresh      string
-	UserProfile  string
-	Models       string
-	Quota        string
-	ActivitySlot string
+	Exchange      string
+	Refresh       string
+	UserProfile   string
+	Models        string
+	Quota         string
+	CreditSummary string
+	ActivitySlot  string
 	// ActivityContext is a prefix; the activity code and query are appended.
 	ActivityContext string
 }
@@ -161,6 +165,7 @@ func DefaultEndpoints() Endpoints {
 		UserProfile:     "/api/user/profile",
 		Models:          "/api/models/available",
 		Quota:           "/api/user/quota",
+		CreditSummary:   "/api/user/profile-summary",
 		ActivitySlot:    "/api/client-activities/slot",
 		ActivityContext: "/api/client-activities",
 	}
@@ -202,6 +207,46 @@ type Quota struct {
 	Raw map[string]any
 }
 
+// CreditPackage is one credit bucket from GET /api/user/profile-summary.
+//
+// The backend groups credits by grant source (subscription, boost, free,
+// bonus, invitation, campaign) and reports the remaining amount per group.
+type CreditPackage struct {
+	// Type is the machine group code (e.g. "subscription", "bonus").
+	Type string
+	// Label and LabelEn are the localized display names the client shows.
+	Label   string
+	LabelEn string
+	// CreditsRemaining is the untouched remaining amount in this bucket.
+	CreditsRemaining float64
+	// ExpiresAt is the backend's own expiry string (ISO 8601, empty when the
+	// bucket does not expire).
+	ExpiresAt string
+}
+
+// CreditSummary is the account's credit total with its per-bucket breakdown.
+//
+// This is the source the desktop client's account menu reads
+// (`profileSummary.totalCreditsRemaining` and `profileSummary.creditItems`).
+// GET /api/user/quota is a different view: it carries only the free-tier bucket
+// (freeCreditsTotal/freeCreditsRemaining) and drives the low-credit purchase
+// gate, so it understates an account whose credits also include activity and
+// daily-login grants.
+type CreditSummary struct {
+	// TotalCreditsRemaining is the backend's own account total.
+	TotalCreditsRemaining float64
+	// TotalKnown reports whether the total was present; false means unknown,
+	// never zero.
+	TotalKnown bool
+	// Packages is the per-bucket breakdown, in backend order.
+	Packages []CreditPackage
+	// UserID and Nickname are the account identity the summary carries.
+	UserID   string
+	Nickname string
+	// Raw is the untrimmed data object, kept for diagnostics.
+	Raw map[string]any
+}
+
 // ActivitySnapshot is the read-only state of one backend activity (daily
 // check-in / one-time credit). CLIProxyAPI reports this but never executes an
 // activity action on the user's behalf.
@@ -216,6 +261,103 @@ type ActivitySnapshot struct {
 	Placement string
 	// Context is the raw activity context payload when it could be read.
 	Context map[string]any
+}
+
+// activityState returns the context's "state" object, if any.
+func (s *ActivitySnapshot) activityState() map[string]any {
+	if s == nil || s.Context == nil {
+		return nil
+	}
+	return decodeJSONObjectField(s.Context, "state")
+}
+
+// Available reports whether the slot exposes a claimable activity.
+func (s *ActivitySnapshot) Available() bool {
+	return s != nil && s.SlotState == "available" && s.ActivityCode != "" && s.ConfigRevision > 0
+}
+
+// ClaimedToday reports the backend's own "already claimed today" flag.
+func (s *ActivitySnapshot) ClaimedToday() bool {
+	return readBool(s.activityState(), "claimedToday")
+}
+
+// Completed reports whether the whole activity period is finished, which makes
+// today's reward moot.
+func (s *ActivitySnapshot) Completed() bool {
+	return readBool(s.activityState(), "completed")
+}
+
+// ClaimedDays is the number of days already claimed in this activity.
+func (s *ActivitySnapshot) ClaimedDays() int64 {
+	return readInt64(s.activityState(), "claimedDays")
+}
+
+// ClaimedCredits is the total granted by this activity so far.
+func (s *ActivitySnapshot) ClaimedCredits() float64 {
+	value, _ := firstNumeric(s.activityState(), "claimedCredits")
+	return value
+}
+
+// RewardCredits is the reward one claim is worth, when the activity advertises
+// it.
+func (s *ActivitySnapshot) RewardCredits() float64 {
+	value, _ := firstNumeric(s.activityState(), "rewardCredits")
+	return value
+}
+
+// Actions lists the action ids the activity currently accepts.
+func (s *ActivitySnapshot) Actions() []string {
+	if s == nil || s.Context == nil {
+		return nil
+	}
+	raw, ok := s.Context["actions"].([]any)
+	if !ok {
+		return nil
+	}
+	actions := make([]string, 0, len(raw))
+	for _, item := range raw {
+		if text, okText := item.(string); okText && strings.TrimSpace(text) != "" {
+			actions = append(actions, strings.TrimSpace(text))
+		}
+	}
+	return actions
+}
+
+// ActivityActionCheckIn is the daily check-in action id.
+const ActivityActionCheckIn = "check_in"
+
+// ActivityAlreadyClaimedCode is the backend business code for a duplicate
+// claim. The client reports it as success.
+const ActivityAlreadyClaimedCode = 51104
+
+// ErrActivityAlreadyClaimed marks a claim the backend accounted for already.
+var ErrActivityAlreadyClaimed = errors.New("lobsterai-server: activity already claimed")
+
+// ActivityClaimRequest describes one activity action execution.
+type ActivityClaimRequest struct {
+	// ActivityCode is the activity the action belongs to.
+	ActivityCode string
+	// ActionID is the action to run (see ActivityActionCheckIn).
+	ActionID string
+	// ConfigRevision is the revision read from the activity slot.
+	ConfigRevision int64
+	// IdempotencyKey deduplicates a retried claim. The backend accepts
+	// ^[A-Za-z0-9._:-]{1,64}$; an empty value lets the client generate one.
+	IdempotencyKey string
+}
+
+// ActivityClaim is the normalized result of an activity action.
+type ActivityClaim struct {
+	// Granted is the credit amount the backend reports for this claim.
+	Granted float64
+	// GrantedKnown reports whether Granted was present.
+	GrantedKnown bool
+	// PeriodKey identifies the accounted period (e.g. "2026-10-15").
+	PeriodKey string
+	// Message is the backend's own human-readable message, when any.
+	Message string
+	// Raw is the untrimmed action result payload.
+	Raw map[string]any
 }
 
 // Client performs LobsterAI backend credential operations.
@@ -289,6 +431,9 @@ func (c *Client) SetEndpoints(endpoints Endpoints) {
 	}
 	if strings.TrimSpace(endpoints.Quota) != "" {
 		c.endpoints.Quota = endpoints.Quota
+	}
+	if strings.TrimSpace(endpoints.CreditSummary) != "" {
+		c.endpoints.CreditSummary = endpoints.CreditSummary
 	}
 	if strings.TrimSpace(endpoints.ActivitySlot) != "" {
 		c.endpoints.ActivitySlot = endpoints.ActivitySlot
@@ -590,6 +735,36 @@ func (c *Client) FetchQuota(ctx context.Context, accessToken string) (*Quota, er
 	return parseQuota(data), nil
 }
 
+// FetchCreditSummary reads the account's credit total with its per-bucket
+// breakdown.
+//
+// This is the read the desktop client's account menu renders
+// (`profileSummary.totalCreditsRemaining` + `profileSummary.creditItems`), so it
+// is the view that matches what the user sees. GET /api/user/quota is a
+// different view (see FetchQuota): it carries only the free-tier bucket and
+// drives the low-credit purchase gate, so using it alone understates an account
+// whose credits also include activity and daily-login grants. The two are
+// reported separately rather than one standing in for the other.
+func (c *Client) FetchCreditSummary(ctx context.Context, accessToken string) (*CreditSummary, error) {
+	accessToken = strings.TrimSpace(accessToken)
+	if accessToken == "" {
+		return nil, fmt.Errorf("lobsterai-server: access token is required")
+	}
+	endpoint := c.appendKeyfromQuery(c.backendURL + c.endpoints.CreditSummary)
+	body, status, errGet := c.getJSON(ctx, endpoint, accessToken)
+	if errGet != nil {
+		return nil, errGet
+	}
+	if status < 200 || status >= 300 {
+		return nil, fmt.Errorf("lobsterai-server: credit summary failed with status %d: %s", status, summarizeBody(body))
+	}
+	data, errEnvelope := unwrapEnvelope(body)
+	if errEnvelope != nil {
+		return nil, errEnvelope
+	}
+	return parseCreditSummary(data), nil
+}
+
 // ActivityPlacementDesktopSidebar is the placement the desktop client uses for
 // the daily check-in activity.
 const ActivityPlacementDesktopSidebar = "desktop_sidebar"
@@ -676,6 +851,96 @@ func (c *Client) FetchActivitySnapshot(ctx context.Context, accessToken, placeme
 	}
 	snapshot.Context = contextData
 	return snapshot, nil
+}
+
+// ClaimActivity executes one activity action, which is what the daily check-in
+// does inside the desktop client.
+//
+// This is the only write this client performs against the activity surface;
+// FetchActivitySnapshot stays read-only, so a caller that only wants to observe
+// never grants anything. The backend deduplicates by idempotencyKey and answers
+// ActivityAlreadyClaimedCode once the period is accounted for, which is reported
+// as ErrActivityAlreadyClaimed rather than as a failure: the reward was granted
+// earlier, so a retry must not be escalated as an error.
+func (c *Client) ClaimActivity(ctx context.Context, accessToken string, request ActivityClaimRequest) (*ActivityClaim, error) {
+	if c == nil {
+		return nil, fmt.Errorf("lobsterai-server: client is nil")
+	}
+	activityCode := strings.TrimSpace(request.ActivityCode)
+	if activityCode == "" {
+		return nil, fmt.Errorf("lobsterai-server: activity code is required")
+	}
+	actionID := strings.TrimSpace(request.ActionID)
+	if actionID == "" {
+		actionID = ActivityActionCheckIn
+	}
+	accessToken = strings.TrimSpace(accessToken)
+	if accessToken == "" {
+		return nil, fmt.Errorf("lobsterai-server: access token is required")
+	}
+	idempotencyKey := strings.TrimSpace(request.IdempotencyKey)
+	if idempotencyKey == "" {
+		idempotencyKey = newActivityIdempotencyKey()
+	}
+	payload := map[string]any{
+		"configRevision": request.ConfigRevision,
+		"idempotencyKey": idempotencyKey,
+		"payload":        map[string]any{},
+	}
+	path := c.endpoints.ActivityContext + "/" + url.PathEscape(activityCode) +
+		"/actions/" + url.PathEscape(actionID)
+	body, status, errPost := c.postJSON(ctx, path, payload, accessToken)
+	if errPost != nil {
+		return nil, errPost
+	}
+	raw := decodeJSONObject(body)
+	if raw == nil {
+		return nil, fmt.Errorf("lobsterai-server: empty action response: %s", summarizeBody(body))
+	}
+	// An absent business code is a failure, not a success: the backend always
+	// answers the envelope, so a missing code means the response is not the
+	// contract this code understands.
+	code, codePresent := firstNumeric(raw, "code")
+	if !codePresent {
+		return nil, fmt.Errorf("lobsterai-server: action response has no business code: %s", summarizeBody(body))
+	}
+	if int64(code) == ActivityAlreadyClaimedCode {
+		return nil, ErrActivityAlreadyClaimed
+	}
+	if code != 0 {
+		message := firstNonEmpty(readString(raw, "message"), readString(raw, "msg"))
+		if message == "" {
+			message = "unknown error"
+		}
+		return nil, fmt.Errorf("lobsterai-server: activity action failed (code %d): %s", int64(code), message)
+	}
+	if status < 200 || status >= 300 {
+		return nil, fmt.Errorf("lobsterai-server: activity action failed with status %d: %s", status, summarizeBody(body))
+	}
+	data, _ := raw["data"].(map[string]any)
+	result := decodeJSONObjectField(data, "result")
+	if result == nil {
+		result = data
+	}
+	claim := &ActivityClaim{Raw: cloneAnyMap(result)}
+	// The granted amount is named differently across activity types.
+	if granted, ok := firstNumeric(claim.Raw, "creditsGranted", "rewardCredits", "credits"); ok {
+		claim.Granted = granted
+		claim.GrantedKnown = true
+	}
+	claim.PeriodKey = readString(claim.Raw, "periodKey", "period_key")
+	claim.Message = firstNonEmpty(readString(claim.Raw, "message"), readString(claim.Raw, "msg"))
+	return claim, nil
+}
+
+// newActivityIdempotencyKey builds the client-side dedupe key the backend
+// accepts, which must match ^[A-Za-z0-9._:-]{1,64}$.
+func newActivityIdempotencyKey() string {
+	buffer := make([]byte, 8)
+	if _, errRead := rand.Read(buffer); errRead != nil {
+		return fmt.Sprintf("cli-%d", time.Now().UnixMilli())
+	}
+	return fmt.Sprintf("cli-%d-%s", time.Now().UnixMilli(), hex.EncodeToString(buffer))
 }
 
 func (c *Client) getJSON(ctx context.Context, endpoint, token string) ([]byte, int, error) {
@@ -864,6 +1129,44 @@ func parseQuota(data map[string]any) *Quota {
 		quota.PurchasedCredits = int64(purchased)
 	}
 	return quota
+}
+
+// parseCreditSummary maps the profile-summary payload into a CreditSummary.
+//
+// The total stays unknown unless the backend reports it: a missing
+// totalCreditsRemaining is not a zero balance, and the handler must be able to
+// tell the two apart before it renders anything.
+func parseCreditSummary(data map[string]any) *CreditSummary {
+	summary := &CreditSummary{}
+	if data == nil {
+		return summary
+	}
+	summary.Raw = cloneAnyMap(data)
+	if total, ok := firstNumeric(data, "totalCreditsRemaining", "total_credits_remaining"); ok {
+		summary.TotalCreditsRemaining = total
+		summary.TotalKnown = true
+	}
+	summary.UserID = readScalarString(data, "id", "userId", "user_id")
+	summary.Nickname = readString(data, "nickname", "nickName")
+	if items, ok := data["creditItems"].([]any); ok {
+		packages := make([]CreditPackage, 0, len(items))
+		for _, item := range items {
+			entry, okEntry := item.(map[string]any)
+			if !okEntry {
+				continue
+			}
+			remaining, _ := firstNumeric(entry, "creditsRemaining", "credits_remaining")
+			packages = append(packages, CreditPackage{
+				Type:             readString(entry, "type"),
+				Label:            readString(entry, "label"),
+				LabelEn:          readString(entry, "labelEn", "label_en"),
+				CreditsRemaining: remaining,
+				ExpiresAt:        readString(entry, "expiresAt", "expires_at"),
+			})
+		}
+		summary.Packages = packages
+	}
+	return summary
 }
 
 // parseModels maps the /api/models/available data array into normalized models.

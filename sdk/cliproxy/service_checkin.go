@@ -12,7 +12,8 @@ func (s *Service) initCheckinService() *checkin.Service {
 		}
 		s.checkinService = checkin.NewService(source,
 			checkin.NewCodeArtsAdapter(), checkin.NewCodeBuddyAdapter(),
-			checkin.NewDumateAdapter(), checkin.NewTraeAdapter())
+			checkin.NewDumateAdapter(), checkin.NewLobsterAIAdapter(),
+			checkin.NewTraeAdapter())
 	}
 	return s.checkinService
 }

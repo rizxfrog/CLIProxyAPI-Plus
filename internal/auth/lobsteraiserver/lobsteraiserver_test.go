@@ -3,6 +3,7 @@ package lobsteraiserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -350,5 +351,198 @@ func TestParseUserAcceptsNumericIDAndYid(t *testing.T) {
 	}
 	if user.Name != "130****2189" {
 		t.Fatalf("name = %q", user.Name)
+	}
+}
+
+func TestFetchCreditSummaryParsesTotalAndPackages(t *testing.T) {
+	var sawPath, sawQuery string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawPath, sawQuery = r.URL.Path, r.URL.RawQuery
+		if got := r.Header.Get("Authorization"); got != "Bearer acc-1" {
+			t.Errorf("authorization = %q", got)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code": 0, "message": "success",
+			"data": map[string]any{
+				"id":                    float64(123318),
+				"nickname":              "130****2189",
+				"totalCreditsRemaining": 5297.72,
+				"creditItems": []any{
+					map[string]any{"type": "free", "label": "免费额度", "labelEn": "Free", "creditsRemaining": 299.86, "expiresAt": "2026-10-29"},
+					map[string]any{"type": "bonus", "label": "每日登录奖励", "labelEn": "Daily login", "creditsRemaining": 100.0, "expiresAt": nil},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClientWithProxyURL(&config.Config{}, "", server.URL)
+	client.SetKeyfromIdentity("official", "official", "2026.10.13", "")
+	summary, errSummary := client.FetchCreditSummary(context.Background(), "acc-1")
+	if errSummary != nil {
+		t.Fatalf("FetchCreditSummary: %v", errSummary)
+	}
+	if sawPath != "/api/user/profile-summary" {
+		t.Fatalf("path = %q", sawPath)
+	}
+	// The account-menu read carries the same attribution identity as the other
+	// account reads.
+	if !strings.Contains(sawQuery, "firstKeyfrom=official") || !strings.Contains(sawQuery, "version=2026.10.13") {
+		t.Fatalf("keyfrom query = %q", sawQuery)
+	}
+	if !summary.TotalKnown || summary.TotalCreditsRemaining != 5297.72 {
+		t.Fatalf("total = %v known=%v", summary.TotalCreditsRemaining, summary.TotalKnown)
+	}
+	if len(summary.Packages) != 2 {
+		t.Fatalf("packages = %+v", summary.Packages)
+	}
+	if summary.Packages[1].Type != "bonus" || summary.Packages[1].Label != "每日登录奖励" || summary.Packages[1].CreditsRemaining != 100 {
+		t.Fatalf("bonus package = %+v", summary.Packages[1])
+	}
+	if summary.UserID != "123318" {
+		t.Fatalf("user id = %q", summary.UserID)
+	}
+}
+
+func TestFetchCreditSummaryKeepsAnAbsentTotalUnknown(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "message": "success", "data": map[string]any{}})
+	}))
+	defer server.Close()
+	client := NewClientWithProxyURL(nil, "", server.URL)
+	summary, errSummary := client.FetchCreditSummary(context.Background(), "acc-1")
+	if errSummary != nil {
+		t.Fatalf("FetchCreditSummary: %v", errSummary)
+	}
+	// Absent must not become a zero balance: the handler reports it as unknown.
+	if summary.TotalKnown || summary.TotalCreditsRemaining != 0 {
+		t.Fatalf("total = %v known=%v", summary.TotalCreditsRemaining, summary.TotalKnown)
+	}
+	if len(summary.Packages) != 0 {
+		t.Fatalf("packages = %+v", summary.Packages)
+	}
+}
+
+func TestFetchCreditSummaryRequiresAToken(t *testing.T) {
+	client := NewClientWithProxyURL(nil, "", DefaultBackendURL)
+	if _, errSummary := client.FetchCreditSummary(context.Background(), "  "); errSummary == nil {
+		t.Fatal("expected an error without an access token")
+	}
+}
+
+func TestClaimActivityPostsTheCheckInAndParsesTheGrant(t *testing.T) {
+	var sawMethod, sawPath string
+	var sawBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawMethod, sawPath = r.Method, r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&sawBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code": 0, "message": "success",
+			"data": map[string]any{"result": map[string]any{
+				"creditsGranted": 100.0, "periodKey": "2026-10-15", "message": "签到成功",
+			}},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClientWithProxyURL(&config.Config{}, "", server.URL)
+	claim, errClaim := client.ClaimActivity(context.Background(), "acc-1", ActivityClaimRequest{
+		ActivityCode:   "daily-check-in-evergreen-prod-20260814",
+		ActionID:       ActivityActionCheckIn,
+		ConfigRevision: 7,
+	})
+	if errClaim != nil {
+		t.Fatalf("ClaimActivity: %v", errClaim)
+	}
+	if sawMethod != http.MethodPost {
+		t.Fatalf("method = %q", sawMethod)
+	}
+	want := "/api/client-activities/daily-check-in-evergreen-prod-20260814/actions/check_in"
+	if sawPath != want {
+		t.Fatalf("path = %q, want %q", sawPath, want)
+	}
+	if sawBody["configRevision"] != float64(7) {
+		t.Fatalf("configRevision = %v", sawBody["configRevision"])
+	}
+	if key, _ := sawBody["idempotencyKey"].(string); key == "" {
+		t.Fatalf("idempotencyKey missing: %v", sawBody)
+	}
+	if _, ok := sawBody["payload"].(map[string]any); !ok {
+		t.Fatalf("empty payload object required: %v", sawBody)
+	}
+	if !claim.GrantedKnown || claim.Granted != 100 {
+		t.Fatalf("granted = %v known=%v", claim.Granted, claim.GrantedKnown)
+	}
+	if claim.PeriodKey != "2026-10-15" {
+		t.Fatalf("periodKey = %q", claim.PeriodKey)
+	}
+}
+
+func TestClaimActivityMapsTheDuplicateClaimCode(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": ActivityAlreadyClaimedCode, "message": "已领取"})
+	}))
+	defer server.Close()
+	client := NewClientWithProxyURL(nil, "", server.URL)
+	_, errClaim := client.ClaimActivity(context.Background(), "acc-1", ActivityClaimRequest{
+		ActivityCode: "daily-check-in", ActionID: ActivityActionCheckIn, ConfigRevision: 1,
+	})
+	if !errors.Is(errClaim, ErrActivityAlreadyClaimed) {
+		t.Fatalf("err = %v, want ErrActivityAlreadyClaimed", errClaim)
+	}
+}
+
+func TestClaimActivityRejectsAResponseWithoutABusinessCode(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"unexpected":true}`))
+	}))
+	defer server.Close()
+	client := NewClientWithProxyURL(nil, "", server.URL)
+	if _, errClaim := client.ClaimActivity(context.Background(), "acc-1", ActivityClaimRequest{
+		ActivityCode: "daily-check-in", ActionID: ActivityActionCheckIn, ConfigRevision: 1,
+	}); errClaim == nil {
+		t.Fatal("a response without a business code must not read as success")
+	}
+}
+
+func TestClaimActivityRequiresAnActivityCode(t *testing.T) {
+	client := NewClientWithProxyURL(nil, "", DefaultBackendURL)
+	if _, errClaim := client.ClaimActivity(context.Background(), "acc-1", ActivityClaimRequest{ActionID: ActivityActionCheckIn}); errClaim == nil {
+		t.Fatal("expected an error without an activity code")
+	}
+}
+
+func TestActivitySnapshotExposesTheClaimState(t *testing.T) {
+	snapshot := &ActivitySnapshot{
+		SlotState:      "available",
+		ActivityCode:   "daily-check-in",
+		ConfigRevision: 7,
+		Context: map[string]any{
+			"state": map[string]any{
+				"claimedToday":   true,
+				"completed":      false,
+				"claimedDays":    float64(3),
+				"claimedCredits": 300.0,
+				"rewardCredits":  100.0,
+			},
+			"actions": []any{"check_in"},
+		},
+	}
+	if !snapshot.Available() {
+		t.Fatal("an open slot with a revision must be available")
+	}
+	if !snapshot.ClaimedToday() || snapshot.Completed() {
+		t.Fatalf("claim state = today:%v completed:%v", snapshot.ClaimedToday(), snapshot.Completed())
+	}
+	if snapshot.ClaimedDays() != 3 || snapshot.ClaimedCredits() != 300 || snapshot.RewardCredits() != 100 {
+		t.Fatalf("counters = days:%d credits:%v reward:%v", snapshot.ClaimedDays(), snapshot.ClaimedCredits(), snapshot.RewardCredits())
+	}
+	if actions := snapshot.Actions(); len(actions) != 1 || actions[0] != ActivityActionCheckIn {
+		t.Fatalf("actions = %+v", actions)
+	}
+	// A slot without a config revision cannot be read any further, so it must
+	// not be reported as claimable.
+	if (&ActivitySnapshot{SlotState: "available", ActivityCode: "x"}).Available() {
+		t.Fatal("a zero config revision must not be claimable")
 	}
 }

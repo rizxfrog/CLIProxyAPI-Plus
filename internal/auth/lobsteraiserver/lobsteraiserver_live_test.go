@@ -82,6 +82,26 @@ func TestLiveModelsAndQuota(t *testing.T) {
 	t.Logf("quota status=%q credits=%d known=%v purchased=%d raw=%v",
 		quota.SubscriptionStatus, quota.Credits, quota.CreditsKnown, quota.PurchasedCredits, quota.Raw)
 
+	// The account-menu read. It must expose a total, and its own buckets must
+	// account for it: the free-tier bucket that /api/user/quota reports is only
+	// part of the balance once activity grants exist.
+	summary, errSummary := client.FetchCreditSummary(ctx, cred.AccessToken)
+	if errSummary != nil {
+		t.Fatalf("FetchCreditSummary: %v", errSummary)
+	}
+	t.Logf("profile-summary total=%v known=%v user=%q nickname=%q",
+		summary.TotalCreditsRemaining, summary.TotalKnown, summary.UserID, summary.Nickname)
+	if !summary.TotalKnown {
+		t.Log("NOTE: the backend reported no totalCreditsRemaining")
+	}
+	bucketed := 0.0
+	for _, item := range summary.Packages {
+		t.Logf("package type=%q label=%q labelEn=%q remaining=%v expires=%q",
+			item.Type, item.Label, item.LabelEn, item.CreditsRemaining, item.ExpiresAt)
+		bucketed += item.CreditsRemaining
+	}
+	t.Logf("packages=%d bucketed=%v", len(summary.Packages), bucketed)
+
 	profile, errProfile := client.FetchUserProfile(ctx, cred.AccessToken)
 	if errProfile != nil {
 		t.Fatalf("FetchUserProfile: %v", errProfile)
