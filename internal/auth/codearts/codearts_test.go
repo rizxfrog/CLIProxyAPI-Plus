@@ -3,6 +3,7 @@ package codearts
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -611,5 +612,209 @@ func TestIsFreeBenefitModel(t *testing.T) {
 		if IsFreeBenefitModel(id) {
 			t.Errorf("IsFreeBenefitModel(%q) = true, want false", id)
 		}
+	}
+}
+
+// TestFetchTokenBalanceExplainsDisabledBenefitGateway pins the diagnostic path
+// for the developer gateway's "invalid channel, group not found" envelope. The
+// gateway answers HTTP 200 for every endpoint once the account's benefit program
+// is off, so the balance read must say so instead of surfacing a bare 4000.
+//
+// The statistics ledger is the primary read, so the handler fails it first to
+// force the gateway fallback this test is about.
+func TestFetchTokenBalanceExplainsDisabledBenefitGateway(t *testing.T) {
+	var gatewayHit, statusHit bool
+	client, server := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case PluginStatisticsPath:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error_code":"APIG.0101","error_msg":"not published"}`))
+		case BalancePath:
+			gatewayHit = true
+			_, _ = w.Write([]byte(`{"error_code":"4000","error_msg":"invalid channel, group not found","result":null}`))
+		case BenefitGatewayConfigPath:
+			statusHit = true
+			_, _ = w.Write([]byte(`{"enabled":false,"is_examination_domain":false,"examination_model_enable":false}`))
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	_, errBalance := client.FetchTokenBalance(context.Background(), "AK", "SK", "ST")
+	if errBalance == nil {
+		t.Fatal("expected an error")
+	}
+	if !gatewayHit || !statusHit {
+		t.Fatalf("gateway=%v status=%v, want both reads", gatewayHit, statusHit)
+	}
+	if !IsBenefitGatewayDisabled(errBalance) {
+		t.Fatalf("error is not typed as a disabled gateway: %v", errBalance)
+	}
+	var disabled *BenefitGatewayDisabledError
+	if !errors.As(errBalance, &disabled) {
+		t.Fatalf("errors.As failed: %v", errBalance)
+	}
+	if disabled.Enabled == nil || *disabled.Enabled {
+		t.Fatalf("switch was not folded in: %+v", disabled)
+	}
+	if !strings.Contains(errBalance.Error(), "disabled") {
+		t.Fatalf("message does not explain the state: %v", errBalance)
+	}
+}
+
+// TestFetchTokenBalanceKeepsOtherEnvelopeErrors pins that unrelated upstream
+// codes still surface as plain API errors.
+func TestFetchTokenBalanceKeepsOtherEnvelopeErrors(t *testing.T) {
+	client, server := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case PluginStatisticsPath:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error_code":"APIG.0101","error_msg":"not published"}`))
+		case BenefitGatewayConfigPath:
+			t.Errorf("the switch must not be read for an unrelated code")
+		default:
+			_, _ = w.Write([]byte(`{"error_code":"1001","error_msg":"quota not provisioned","result":null}`))
+		}
+	}))
+	defer server.Close()
+
+	_, errBalance := client.FetchTokenBalance(context.Background(), "AK", "SK", "ST")
+	if errBalance == nil {
+		t.Fatal("expected an error")
+	}
+	if IsBenefitGatewayDisabled(errBalance) {
+		t.Fatalf("unrelated code was misclassified: %v", errBalance)
+	}
+	var apiErr *Error
+	if !errors.As(errBalance, &apiErr) || apiErr.Code != "1001" {
+		t.Fatalf("unexpected error: %v", errBalance)
+	}
+}
+
+// TestDisabledBenefitGatewayMessageWithoutSwitch covers the case where the
+// switch itself cannot be read: the message must still name the upstream reason
+// instead of pretending the program state is known.
+func TestDisabledBenefitGatewayMessageWithoutSwitch(t *testing.T) {
+	disabled := &BenefitGatewayDisabledError{Code: ErrCodeNoChannelGroup, Message: "invalid channel, group not found"}
+	message := disabled.Error()
+	if strings.Contains(message, "disabled") && !strings.Contains(message, "channel group") {
+		t.Fatalf("message must not claim the program is off without evidence: %q", message)
+	}
+	if !strings.Contains(message, ErrCodeNoChannelGroup) {
+		t.Fatalf("message must carry the upstream code: %q", message)
+	}
+	if IsBenefitGatewayDisabled(nil) {
+		t.Fatal("nil must not be classified as disabled")
+	}
+}
+
+// TestFetchTokenBalancePrefersPluginStatistics pins the primary credit read: the
+// 0.2.8 desktop client replaced the developer-gateway balance call with
+// snap-manager/v1/statistics/plugin, and that is what the account menu renders.
+// The gateway must not be consulted when this read succeeds.
+func TestFetchTokenBalancePrefersPluginStatistics(t *testing.T) {
+	var gatewayHit bool
+	client, server := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case PluginStatisticsPath:
+			if r.Header.Get("Agent-Type") != "" {
+				t.Errorf("snap-manager statistics takes no Agent-Type, got %q", r.Header.Get("Agent-Type"))
+			}
+			if !strings.HasPrefix(r.Header.Get("Authorization"), Algorithm+" Access=") {
+				t.Errorf("statistics request was not signed")
+			}
+			_, _ = w.Write([]byte(`{
+				"metrics":[
+					{"name":"usageTokenChatMessages","usage_token_num":120,"package_token_amount":1000},
+					{"name":"usageTotalPackageCredit","package_credit_amount":500,"package_credit_used":120,
+					 "package_credit_remain":380,"package_credit_expiring_amount":40}
+				],
+				"package":{"spec_code":"codearts.agent.individual.trial","status":"normal",
+					"package_name_en":"Trial","is_token_package":false,"is_credit_package":true},
+				"start_date":"2026-10-16","end_date":"2026-11-17"}`))
+		case BalancePath:
+			gatewayHit = true
+			_, _ = w.Write([]byte(`{"error_code":"0000","result":{"total_quota":1}}`))
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	balance, errBalance := client.FetchTokenBalance(context.Background(), "AK", "SK", "ST")
+	if errBalance != nil {
+		t.Fatalf("balance: %v", errBalance)
+	}
+	if gatewayHit {
+		t.Error("the developer gateway must not be called when the ledger answers")
+	}
+	if !balance.CreditsKnown {
+		t.Error("credits_known must be set for a ledger read")
+	}
+	if balance.TotalQuota != 500 || balance.UsedAmount != 120 || balance.TotalBalance != 380 {
+		t.Fatalf("credit figures not mapped: %+v", balance)
+	}
+	if balance.ExpiringAmount != 40 {
+		t.Fatalf("expiring amount not mapped: %d", balance.ExpiringAmount)
+	}
+	if balance.DailyTokensUsed != 120 || balance.DailyTokenLimit != 1000 {
+		t.Fatalf("token figures not mapped: %+v", balance)
+	}
+	if balance.Package != "Trial" || balance.SpecCode != "codearts.agent.individual.trial" {
+		t.Fatalf("package identity not mapped: %+v", balance)
+	}
+}
+
+// TestFetchTokenBalanceReportsAZeroLedgerAsKnown pins that an all-zero package
+// still reads as a successful, known balance. "Trial with no credits" and
+// "could not read the ledger" must not collapse into the same answer.
+func TestFetchTokenBalanceReportsAZeroLedgerAsKnown(t *testing.T) {
+	client, server := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{
+			"metrics":[
+				{"name":"usageTokenChatMessages","usage_token_num":0,"package_token_amount":0},
+				{"name":"usageTotalPackageCredit","package_credit_amount":0,"package_credit_used":0,
+				 "package_credit_remain":0,"package_credit_expiring_amount":0}
+			],
+			"package":{"spec_code":"codearts.agent.individual.trial","status":"normal","package_name_en":"Trial"}}`))
+	}))
+	defer server.Close()
+
+	balance, errBalance := client.FetchTokenBalance(context.Background(), "AK", "SK", "ST")
+	if errBalance != nil {
+		t.Fatalf("balance: %v", errBalance)
+	}
+	if !balance.CreditsKnown {
+		t.Fatal("an all-zero ledger is still a known balance")
+	}
+	if balance.TotalQuota != 0 || balance.TotalBalance != 0 {
+		t.Fatalf("unexpected figures: %+v", balance)
+	}
+}
+
+// TestFetchTokenBalanceFallsBackToTheGateway pins that the developer gateway is
+// still consulted when the ledger cannot be read, so an account whose benefit
+// program is on keeps a working read.
+func TestFetchTokenBalanceFallsBackToTheGateway(t *testing.T) {
+	client, server := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == PluginStatisticsPath {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"error_code":"5000","error_msg":"internal error"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"error_code":"0000","result":{"channel":"codearts","total_quota":900,"total_balance":700,"used_amount":200}}`))
+	}))
+	defer server.Close()
+
+	balance, errBalance := client.FetchTokenBalance(context.Background(), "AK", "SK", "ST")
+	if errBalance != nil {
+		t.Fatalf("balance: %v", errBalance)
+	}
+	if balance.TotalQuota != 900 || balance.TotalBalance != 700 {
+		t.Fatalf("unexpected fallback figures: %+v", balance)
+	}
+	if balance.CreditsKnown {
+		t.Error("the gateway path does not prove the ledger was read")
 	}
 }

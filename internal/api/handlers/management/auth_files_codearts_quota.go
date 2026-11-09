@@ -25,6 +25,13 @@ type CodeArtsQuota struct {
 	MonthlyTokenLimit int64  `json:"monthly_token_limit"`
 	MonthlyTokensUsed int64  `json:"monthly_tokens_used"`
 	ExpireTime        int64  `json:"expire_time"`
+	// CreditsKnown distinguishes a real zero balance from an unread ledger.
+	CreditsKnown bool `json:"credits_known"`
+	// ExpiringAmount is the credit expiring inside the current window.
+	ExpiringAmount int64 `json:"expiring_amount,omitempty"`
+	// Package and SpecCode identify the subscription the credits belong to.
+	Package  string `json:"package,omitempty"`
+	SpecCode string `json:"spec_code,omitempty"`
 }
 
 // GetCodeArtsQuota returns the signed-in account's credit balance for one
@@ -52,6 +59,13 @@ func (h *Handler) GetCodeArtsQuota(c *gin.Context) {
 	client := newCodeArtsBalanceClient(h.cfg, auth.ProxyURL)
 	balance, errBalance := client.FetchTokenBalance(c.Request.Context(), creds.AccessKey, creds.SecretKey, creds.SecurityToken)
 	if errBalance != nil {
+		// The developer gateway is switched off upstream. This is not a
+		// credential defect and retrying cannot fix it, so answer 502 with an
+		// explanation instead of leaking the bare upstream envelope code.
+		if codeartsauth.IsBenefitGatewayDisabled(errBalance) {
+			c.JSON(http.StatusBadGateway, gin.H{"error": errBalance.Error(), "reason": "benefit_gateway_disabled"})
+			return
+		}
 		status := http.StatusBadGateway
 		if apiErr, ok := errBalance.(*codeartsauth.Error); ok && apiErr.StatusCode >= 400 {
 			status = apiErr.StatusCode
@@ -70,6 +84,10 @@ func (h *Handler) GetCodeArtsQuota(c *gin.Context) {
 		MonthlyTokenLimit: balance.MonthlyTokenLimit,
 		MonthlyTokensUsed: balance.MonthlyTokensUsed,
 		ExpireTime:        balance.ExpireTime,
+		CreditsKnown:      balance.CreditsKnown,
+		ExpiringAmount:    balance.ExpiringAmount,
+		Package:           balance.Package,
+		SpecCode:          balance.SpecCode,
 	})
 }
 

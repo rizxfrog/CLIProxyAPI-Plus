@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -69,6 +70,19 @@ const (
 	BalancePath = "/api/v1/user/tokens/balance"
 	// GatewayConfigPath lists the limited-time free models.
 	GatewayConfigPath = "/api/v1/gateway/config"
+
+	// BenefitGatewayConfigPath reports whether the account's benefit program is
+	// switched on. It lives on the snap host, not the developer gateway, so it
+	// still answers when the gateway rejects every call with ErrCodeNoChannelGroup.
+	BenefitGatewayConfigPath = "/v1/benefit-gateway-config"
+	// ErrCodeNoChannelGroup is the developer-gateway envelope code returned by
+	// every endpoint when the caller resolves to no benefit channel group. It
+	// arrives with HTTP 200, so it must be matched on the code, not the status.
+	ErrCodeNoChannelGroup = "4000"
+	// PluginStatisticsPath is the credit/usage ledger the desktop client's
+	// account menu renders. It replaced the developer-gateway balance read:
+	// the 0.2.8 client no longer calls /api/v1/user/tokens/balance at all.
+	PluginStatisticsPath = "/snap-manager/v1/statistics/plugin"
 
 	// WelfareDeliveryPath lists the welfare activities (including daily check-in).
 	WelfareDeliveryPath = "/v1/ops/delivery"
@@ -434,13 +448,54 @@ type TokenBalance struct {
 	MonthlyTokensUsed int64
 	// ExpireTime is the quota expiry timestamp in milliseconds (0 means none).
 	ExpireTime int64
+	// CreditsKnown reports whether the figures came from a credit ledger. A
+	// package can legitimately report all zeros, so a zero balance must not be
+	// confused with a failed read.
+	CreditsKnown bool
+	// ExpiringAmount is the credit expiring inside the current window.
+	ExpiringAmount int64
+	// Package is the subscription name (e.g. "Trial"); empty when unknown.
+	Package string
+	// SpecCode is the upstream package code (e.g.
+	// "codearts.agent.individual.trial"); empty when unknown.
+	SpecCode string
 }
 
-// FetchTokenBalance queries the developer gateway for the account's credit
-// balance. It signs the request with the temporary AK/SK triple the same way
-// the inference endpoint does.
+// FetchTokenBalance reports the account's credit balance.
+//
+// It reads the plugin statistics ledger first: that is what the 0.2.8 desktop
+// client's account menu renders, and it is the only credit surface that still
+// answers. The developer gateway's balance endpoint is kept as a fallback for
+// accounts whose benefit program is still switched on, but it is only consulted
+// when the primary read fails.
 func (c *Client) FetchTokenBalance(ctx context.Context, accessKey, secretKey, securityToken string) (*TokenBalance, error) {
-	endpoint := strings.TrimRight(c.benefitURL, "/") + "/api/v1/user/tokens/balance"
+	balance, errStatistics := c.fetchPluginStatistics(ctx, accessKey, secretKey, securityToken)
+	if errStatistics == nil {
+		return balance, nil
+	}
+	gateway, errGateway := c.fetchDeveloperGatewayBalance(ctx, accessKey, secretKey, securityToken)
+	if errGateway == nil {
+		return gateway, nil
+	}
+	// A switched-off benefit program explains the gateway failure, so that
+	// message is more useful than the primary read's error. A gateway business
+	// code is likewise a real answer from a live service, so prefer it over a
+	// transport-level failure such as "route not published in this region".
+	if IsBenefitGatewayDisabled(errGateway) {
+		return nil, errGateway
+	}
+	var gatewayAPIErr *Error
+	if errors.As(errGateway, &gatewayAPIErr) && gatewayAPIErr.Code != "" {
+		return nil, errGateway
+	}
+	return nil, errStatistics
+}
+
+// fetchDeveloperGatewayBalance queries the developer gateway for the account's
+// credit balance. It signs the request with the temporary AK/SK triple the same
+// way the inference endpoint does.
+func (c *Client) fetchDeveloperGatewayBalance(ctx context.Context, accessKey, secretKey, securityToken string) (*TokenBalance, error) {
+	endpoint := strings.TrimRight(c.benefitURL, "/") + BalancePath
 	req, errReq := c.signedRequest(ctx, http.MethodGet, endpoint, nil, Credentials{
 		AccessKey:     accessKey,
 		SecretKey:     secretKey,
@@ -484,6 +539,13 @@ func (c *Client) FetchTokenBalance(ctx context.Context, accessKey, secretKey, se
 		return nil, fmt.Errorf("codearts: invalid token balance response: %w", errUnmarshal)
 	}
 	if payload.ErrorCode != "" && payload.ErrorCode != "0000" {
+		if payload.ErrorCode == ErrCodeNoChannelGroup {
+			return nil, c.benefitGatewayDisabled(ctx, Credentials{
+				AccessKey:     accessKey,
+				SecretKey:     secretKey,
+				SecurityToken: securityToken,
+			}, payload.ErrorCode, payload.ErrorMsg)
+		}
 		return nil, &Error{StatusCode: resp.StatusCode, Code: payload.ErrorCode, Message: payload.ErrorMsg}
 	}
 
@@ -578,4 +640,170 @@ type Credentials struct {
 	AccessKey     string
 	SecretKey     string
 	SecurityToken string
+}
+
+// BenefitGatewayStatus reports whether the account's developer-gateway benefit
+// program is switched on.
+//
+// It exists because the gateway answers HTTP 200 with
+// `{"error_code":"4000","error_msg":"invalid channel, group not found"}` on every
+// endpoint once the program is off, which is indistinguishable from a client bug
+// unless the switch itself is read. The switch lives on the snap host, so it
+// keeps answering when the gateway does not.
+type BenefitGatewayStatus struct {
+	// Enabled reports whether the benefit program is switched on upstream.
+	Enabled bool
+	// Raw carries the decoded response for diagnostics.
+	Raw json.RawMessage
+}
+
+// FetchBenefitGatewayStatus reads the benefit-program switch.
+func (c *Client) FetchBenefitGatewayStatus(ctx context.Context, creds Credentials) (*BenefitGatewayStatus, error) {
+	endpoint := strings.TrimRight(c.snapHost, "/") + BenefitGatewayConfigPath
+	raw, errFetch := c.signedGetJSON(ctx, endpoint, creds, map[string]string{
+		"Agent-Type": AgentTypePromptCenter,
+		"X-Language": "zh-cn",
+	})
+	if errFetch != nil {
+		return nil, errFetch
+	}
+	var parsed struct {
+		Enabled bool `json:"enabled"`
+	}
+	if errUnmarshal := json.Unmarshal(raw, &parsed); errUnmarshal != nil {
+		return nil, fmt.Errorf("codearts: invalid benefit gateway config response: %w", errUnmarshal)
+	}
+	return &BenefitGatewayStatus{Enabled: parsed.Enabled, Raw: json.RawMessage(raw)}, nil
+}
+
+// BenefitGatewayDisabledError reports that the developer gateway refused a call
+// because the account resolves to no benefit channel group. It is a program
+// state, not a credential or client defect: the same credential serves the
+// model catalog and inference normally.
+type BenefitGatewayDisabledError struct {
+	// Code is the upstream envelope code (ErrCodeNoChannelGroup).
+	Code string
+	// Message is the upstream message.
+	Message string
+	// Enabled mirrors the benefit-program switch, when it could be read.
+	Enabled *bool
+}
+
+func (e *BenefitGatewayDisabledError) Error() string {
+	if e == nil {
+		return "codearts: the benefit program is unavailable for this account"
+	}
+	if e.Enabled != nil && !*e.Enabled {
+		return "codearts: the developer gateway is off for this account (benefit program disabled), so it reports no credit balance"
+	}
+	return fmt.Sprintf("codearts: the developer gateway resolves this account to no benefit channel group (code %s: %s)", e.Code, e.Message)
+}
+
+// IsBenefitGatewayDisabled reports whether err carries the
+// "invalid channel, group not found" envelope code.
+func IsBenefitGatewayDisabled(err error) bool {
+	var disabled *BenefitGatewayDisabledError
+	return errors.As(err, &disabled)
+}
+
+// benefitGatewayDisabled builds the typed error and folds in the program switch
+// when it can be read, so the message states whether the program is off rather
+// than leaving the operator with a bare upstream code.
+func (c *Client) benefitGatewayDisabled(ctx context.Context, creds Credentials, code, message string) error {
+	disabled := &BenefitGatewayDisabledError{Code: code, Message: message}
+	if status, errStatus := c.FetchBenefitGatewayStatus(ctx, creds); errStatus == nil && status != nil {
+		enabled := status.Enabled
+		disabled.Enabled = &enabled
+	}
+	return disabled
+}
+
+// pluginStatisticsMetric is one row of the plugin statistics ledger.
+type pluginStatisticsMetric struct {
+	Name                  string `json:"name"`
+	Value                 int64  `json:"value"`
+	UsageTokenNum         int64  `json:"usage_token_num"`
+	PackageTokenAmount    int64  `json:"package_token_amount"`
+	PackageCreditAmount   int64  `json:"package_credit_amount"`
+	PackageCreditUsed     int64  `json:"package_credit_used"`
+	PackageCreditRemain   int64  `json:"package_credit_remain"`
+	PackageCreditExpiring int64  `json:"package_credit_expiring_amount"`
+}
+
+// pluginStatisticsResponse mirrors GET /snap-manager/v1/statistics/plugin.
+type pluginStatisticsResponse struct {
+	Metrics []pluginStatisticsMetric `json:"metrics"`
+	Package struct {
+		SpecCode        string `json:"spec_code"`
+		Status          string `json:"status"`
+		PackageNameCn   string `json:"package_name_cn"`
+		PackageNameEn   string `json:"package_name_en"`
+		IsTokenPackage  bool   `json:"is_token_package"`
+		IsCreditPackage bool   `json:"is_credit_package"`
+	} `json:"package"`
+	StartDate string `json:"start_date"`
+	EndDate   string `json:"end_date"`
+}
+
+// Statistics metric names the account menu reads.
+const (
+	// StatisticsMetricTotalCredit is the aggregate credit bucket.
+	StatisticsMetricTotalCredit = "usageTotalPackageCredit"
+	// StatisticsMetricTokenUsage is the chat token bucket.
+	StatisticsMetricTokenUsage = "usageTokenChatMessages"
+)
+
+// fetchPluginStatistics reads the credit ledger the desktop client renders.
+//
+// It sends exactly the headers the client sends -- the snap-manager routes are
+// signature-gated but take no Agent-Type, and adding one is not equivalent.
+func (c *Client) fetchPluginStatistics(ctx context.Context, accessKey, secretKey, securityToken string) (*TokenBalance, error) {
+	endpoint := strings.TrimRight(c.snapHost, "/") + PluginStatisticsPath
+	req, errReq := c.signedRequest(ctx, http.MethodGet, endpoint, nil, Credentials{
+		AccessKey:     accessKey,
+		SecretKey:     secretKey,
+		SecurityToken: securityToken,
+	}, map[string]string{"Content-Type": "application/json"})
+	if errReq != nil {
+		return nil, errReq
+	}
+
+	resp, errDo := c.httpClient.Do(req)
+	if errDo != nil {
+		return nil, fmt.Errorf("codearts: plugin statistics request failed: %w", errDo)
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+	data, errRead := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if errRead != nil {
+		return nil, fmt.Errorf("codearts: read plugin statistics response: %w", errRead)
+	}
+	if resp.StatusCode >= 400 {
+		return nil, &Error{StatusCode: resp.StatusCode, Message: strings.TrimSpace(string(data))}
+	}
+
+	var parsed pluginStatisticsResponse
+	if errUnmarshal := json.Unmarshal(data, &parsed); errUnmarshal != nil {
+		return nil, fmt.Errorf("codearts: invalid plugin statistics response: %w", errUnmarshal)
+	}
+	if len(parsed.Metrics) == 0 {
+		return nil, fmt.Errorf("codearts: plugin statistics response has no metrics")
+	}
+
+	balance := &TokenBalance{Package: parsed.Package.PackageNameEn, SpecCode: parsed.Package.SpecCode}
+	for _, metric := range parsed.Metrics {
+		switch metric.Name {
+		case StatisticsMetricTotalCredit:
+			balance.TotalQuota = metric.PackageCreditAmount
+			balance.UsedAmount = metric.PackageCreditUsed
+			balance.TotalBalance = metric.PackageCreditRemain
+			balance.ExpiringAmount = metric.PackageCreditExpiring
+		case StatisticsMetricTokenUsage:
+			balance.DailyTokenLimit = metric.PackageTokenAmount
+			balance.DailyTokensUsed = metric.UsageTokenNum
+		}
+	}
+	balance.CreditsKnown = true
+	return balance, nil
 }
