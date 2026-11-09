@@ -253,6 +253,94 @@ Authorization    = "SDK-HMAC-SHA256 Access={AK}, SignedHeaders={sh}, Signature={
 `/v1/model/builtin` 响应：`{"builtinModels":[ {...}, ... ]}`
 `/v1/agent-center/agents/detail` 响应：`{"gpts":{"models":[ {"model_parameters":{...}, "model_name", "model_type", "credit", "usage_token_num", "model_quota_num", "think_level"} ]}}`
 
+#### 6.1.1 三个目录接口**不是回退链**（0.2.8 主进程实测）
+
+早期理解把 `builtin` 当成 `agent detail` 失败后的兜底。逐字节挖 `app.asar`
+（`class ModelService`，`@158048161` 起）后确认二者是**并列的两个 IPC**，
+各自对应不同 UI 消费方：
+
+| IPC 通道 | 主进程方法 | 终点 | 谁在调 |
+|---|---|---|---|
+| `model:fetchAgent` | `fetchAgentModels()` | `agents/useragents` → `agents/detail` | **正常路径**：`AgentKernelAdapter` 启动内核前，以及 `KernelClient.listModels()` |
+| `model:listBuiltin` | `listBuiltinModels()` | `/v1/model/builtin` | 只被**注册**，渲染层无调用点 |
+| `model:listVendors` | `listLlmVendors()` | `/v1/llm/vendors` | 自定义模型弹窗的"模型提供商"下拉 |
+
+`KernelClient.listModels()` 的注释仍写着"调 `/model/builtin`"，**但代码调的是
+`window.api.model.fetchAgentModels`**——注释与实现不符，容易误读：
+
+```js
+async listModels(language) {
+  if (!window.api?.model?.fetchAgentModels) {
+    throw new Error("[KernelClient] window.api.model.listBuiltin unavailable");
+  }
+  const response = await window.api.model.fetchAgentModels(language);   // ← 实际
+  ...
+}
+```
+
+结论：**`agents/detail` 是权威目录，`builtin` 是并行补充（主要贡献多模态判定）**。
+`builtin` 的唯一不可替代作用是 `model_category === "图片理解"` 多模态标记。
+
+**端点存在性实测（2026-11-10）**：用伪造但格式合法的 STS 三元组，经仓库的
+`SDK-HMAC-SHA256` 签名请求真实 `snap-access.cn-north-4.myhuaweicloud.com`：
+
+| 端点 | 响应 |
+|---|---|
+| `/v1/model/builtin` | `HTTP 503 APIG.0613 The IAM service is currently unavailable` |
+| `/v1/agent-center/agents/useragents` | `HTTP 503 APIG.0613` |
+| `/v1/llm/vendors` | `HTTP 503 APIG.0613` |
+
+三者都推进到 **IAM 鉴权阶段才被拒**（不是 404 / 不是路由不存在），证明：
+① 路径正确；② 签名头形态被网关接受。区别仅在于凭据无效。
+
+
+#### 6.1.2 客户端对目录做的裁剪（必须照抄，否则多出模型）
+
+渲染层不是原样展示，有两道过滤：
+
+```js
+// ① model_type === "third" 一律丢弃（第三方托管模型不进内核）
+// ② 按 model_name 黑名单丢弃
+const EXCLUDED_NAMES = ["GLM-5.1", "Qwen3-VL-235B", "maas-glm-4.7"];
+
+// 多模态判定（builtin 路径）
+data.builtinModels.filter(m => m.model_type !== "third" && m.model_category === "图片理解")
+                   .map(m => m.model_id);
+
+// 多模态判定（agent detail 路径）——注意用的是 supports_images
+if (model.model_parameters.supports_images) multimodalModels.push(...);
+```
+
+两条路径的多模态判据**不同**：`builtin` 看 `model_category`，`detail` 看
+`model_parameters.supports_images`。仓库实现里两者都有，但没做 `third` 过滤
+——若未来把 `FetchModels` 接上，`third` 条目会漏进目录。
+
+#### 6.1.3 `detail` 里两个必须显式透传的顶层字段
+
+`models[]` 条目的字段分两层：`model_parameters`（内部扁平结构）和**顶层**字段。
+渲染层展开 `...model.model_parameters` 时，顶层字段不会自动带过去，必须手写：
+
+| 顶层字段 | 用途 |
+|---|---|
+| `model_mode` | 值为 `"fastmode"` 时是快速模型 → 请求头 `x-mode-type: fastmode`（`FAST_MODEL_MODE`） |
+| `think_level` / `credit` / `usage_token_num` / `model_quota_num` / `notice` / `model_tag` | 思考档位 / 计费 / 配额 / 角标 |
+
+`x-mode-type` 与 `maas_type` 并列注入到**上行请求头**（`AiChannel.prompt`，`@234054529`）：
+
+```js
+const requestHeaders = {
+  ...maasType ? { "maas_type": maasType } : {},          // benefit / education
+  ...isFast    ? { "x-mode-type": FAST_MODEL_MODE } : {}, // "fastmode"
+  "plugin-name": "codearts_space", "plugin-version": appVersion,
+  "ide-name": "codearts_space",   "ide-version": appVersion,
+  "x-ot-client-type": "desktop",  ...
+};
+```
+
+> ⚠️ 仓库当前**只实现了 `maas_type`**，没有读 `model_mode` 也没有发 `x-mode-type`。
+> 对于被标记为快速通道的模型，上行会缺少该头（是否影响路由未实测，见 §6.1.4）。
+
+
 ### 6.2 模型参数字段（逆向自渲染层 `flattenBuiltinModels`）
 
 | 字段 | 含义 | 映射到内核 |
@@ -302,6 +390,17 @@ Authorization    = "SDK-HMAC-SHA256 Access={AK}, SignedHeaders={sh}, Signature={
 
 `GET /v1/model/builtin`（`Agent-Type: PromptCenter`，`X-Language: zh-cn|en-us`）
 另外返回 `Qwen3-VL-235B`（`model_category == "图片理解"` → 多模态）。
+
+> 🔎 **`Qwen3-VL-235B` 的矛盾要说清**：客户端对它有两种用法，互不冲突——
+> ① **计入多模态名单**：`multimodalModels` 在**黑名单过滤之前**收集，
+>    所以 `Qwen3-VL-235B` 会作为"支持图片"的模型 id 传给内核；
+> ② **不进可选项列表**：随后的 `models.push` 才应用
+>    `["GLM-5.1","Qwen3-VL-235B","maas-glm-4.7"]` 黑名单，因此它不出现在
+>    模型下拉里，用户无法手动选它（由内核在图片场景内部路由）。
+>
+> 仓库静态目录保留了 `Qwen3-VL-235B` 并标记支持图片，这与 ①一致；
+> 用户能手动选中它则是客户端不提供的额外能力。
+
 
 > ⚠️ **id 与显示名不同名**：上行必须用 `glm-5.2-sft-harmony`，
 > 只接受 `GLM-5.2-ArkTS-SPARK` 会 404。
@@ -594,10 +693,18 @@ const signedHeaders = sign({
    可忽略 `agent-kernel` 整套，直接发标准 OpenAI 请求。
    `max_tokens` **必须钳到 65536**（目录里的 131072/393216 会被网关 400 拒绝）。
    限时福利模型需额外加 `maas_type: benefit` 头（见 §6.3.1）。
-5. **模型列表**：`/v1/agent-center/agents/detail`（`Agent-Type: AgentCenter`）为主，
-   `/v1/model/builtin` 补多模态，`/api/v1/gateway/config` 补福利模型
-   （**该端点需先确认权益开关，见 §7.2.1**）；
+5. **模型列表**：`/v1/agent-center/agents/detail`（`Agent-Type: AgentCenter`）是**权威且唯一
+   的展示路径**；`/v1/model/builtin` 是**并列**接口而非回退（§6.1.1），主要用来补多模态判定；
+   `/api/v1/gateway/config` 补福利模型（**该端点需先确认权益开关，见 §7.2.1**）；
    静态兜底见 `internal/registry/models/models.json` 的 `codearts` 分节。
+   过滤规则必须照抄（`model_type !== "third"` + `GLM-5.1/Qwen3-VL-235B/maas-glm-4.7`
+   黑名单），见 §6.1.2。
+   > ⚠️ **现状**：`internal/auth/codearts/models.go` 里的 `FetchModels` /
+   > `FetchAgentModels` / `FetchBuiltinModels` / `FetchFreeBenefitModels`
+   > **没有任何生产调用方**——`sdk/cliproxy/service_models.go` 走的是静态
+   > `registry.GetCodeArtsModels()`。这组函数目前只是带单测的死代码，
+   > 接线上线前需要补 `third` 过滤与 `x-mode-type`（§6.1.3）。
+
 6. **额度**：读 `{snapEngineUrl}/snap-manager/v1/statistics/plugin`（§7.2.2），
    **不要**读 opengw 的 `user/tokens/balance`（整族已下线）。用 `credits_known`
    把「读到 0」与「读不到」区分开。
