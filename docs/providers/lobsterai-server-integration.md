@@ -121,6 +121,44 @@ const withKeyfromBody = (body) => ({ ...body, ...buildKeyfromPayload() });
 
 实测：目录探测注册 7 个模型，`GET /v1/models` 返回这 7 个；请求未注册模型得到 `400 model_not_found`。
 
+### 4b. 企业账号上下文头（source-confirmed，2026-11-09 补齐）
+
+客户端把企业身份作为**两个请求头**加在**每一个已鉴权请求**上（`AuthSessionManager.fetch`
+统一注入，见 `main.ts:6049-6056`），后端据此把账号限定到企业池：
+
+| 头 | 取值 | 来源 |
+| --- | --- | --- |
+| `X-LobsterAI-Account-Mode` | `enterprise` | `EnterpriseAccountRequestHeader.AccountMode`（`shared/enterpriseAccount/constants.ts:67-70`） |
+| `X-LobsterAI-Enterprise-Id` | 十进制字符串 | 同上（`EnterpriseAccountRequestHeader.EnterpriseId`） |
+
+- **个人账号两个头都不发**（`buildEnterpriseAccountRequestHeaders(null) → {}`，`enterpriseAccount/context.ts:267-275`），
+  这本身就是判据：本实现用「凭据里有没有 `enterprise_id`」决定发不发，而不是发一个空值。
+- 上下文从 `GET {base}/api/enterprise/context` 读取（`Accept: application/json`）。归一化要求
+  `enterpriseId` 为**正整数**、`enterpriseName` 非空、`role ∈ {super_admin, member}`
+  （`normalizeEnterpriseAccountContext`）；`accountMode: "personal"` 或字段不全 → 视为无上下文。
+  嵌套位置在客户端有 6 个候选键（`enterpriseContext`/`accountContext`/`organizationContext`/`context`/`user`/`data`），
+  本实现按同一顺序查找。
+- 业务码 `41600` NotFound / `41602` NotMember / `41612` AccountModeMismatch 是**终态**（清掉已有上下文）；
+  其余非 0（如 `41601` Unavailable）只代表本次读失败，**不得**抹掉已知上下文。
+- 本实现：登录时（CLI 与管理端各一次）best-effort 读一次并写入凭据
+  （`account_mode` / `enterprise_id` / `enterprise_name` / `enterprise_role` / `enterprise_member_id`）；
+  之后由 synthesizer 暴露为属性，执行器、管理额度读、签到适配器统一带上这两个头。
+- 实测：本账号为**个人账号**，`FetchEnterpriseContext` 返回 `(nil, nil)`，两个头均不发（见 §9）。
+
+### 4c. 活动面的 `platform`（source-confirmed，2026-11-09 补齐）
+
+活动接口的 `platform` **不是渠道名，而是运行环境判别字段**：客户端发的是自己的
+`process.platform`（`main.ts:8236`/`8247` → `win32` / `darwin` / `linux`），后端对**其它任何值**
+（如早先误用的 `cli`）静默返回空槽位。
+
+- 本实现按 `runtime.GOOS` 映射到这同一套取值（`ActivityPlatformFor`）。
+- `runtime.GOOS` 是**代理主机的系统**，不一定等于账号当初使用的环境，且没有任何 Electron 对应物的
+  主机（freebsd 等）无法映射。因此：
+  - 未知主机**不再**伪装成 `linux` 上报，而是由 `ActivityPlatformFor` 返回空、由适配器发出警告
+    （`activity platform is unknown for <goos>; sent linux instead`），
+  - 并提供凭据级覆盖 `activity_platform`，让运维显式声明该账号期望的环境。
+- 实测：本机 `ActivityPlatformFor("windows") == "win32"`，活动槽位 `slotState=available`（见 §9）。
+
 ## 5. 配额 / 积分 (Quota) — 只读观测，三者分离
 
 | 机制 | 含义 | 本实现 |
@@ -158,7 +196,7 @@ const withKeyfromBody = (body) => ({ ...body, ...buildKeyfromPayload() });
 
 | 关注点 | 位置 |
 | --- | --- |
-| 协议客户端（登录/刷新/模型/额度/活动） | `internal/auth/lobsteraiserver/lobsteraiserver.go` |
+| 协议客户端（登录/刷新/模型/额度/活动/企业上下文） | `internal/auth/lobsteraiserver/lobsteraiserver.go`（含 `FetchEnterpriseContext`、`SetEnterpriseContext`、`SetActivityPlatform`、`ActivityPlatformFor`） |
 | 回环回调服务器 | `internal/auth/lobsteraiserver/oauth_server.go` |
 | SDK authenticator | `sdk/auth/lobsterai_server.go` + `sdk/auth/refresh_registry.go` |
 | CLI 登录 | `internal/cmd/lobsterai_server_login.go` + `cmd/server/main.go` (`--lobsterai-server-login`) |
@@ -166,7 +204,7 @@ const withKeyfromBody = (body) => ({ ...body, ...buildKeyfromPayload() });
 | 管理 OAuth | `internal/api/handlers/management/auth_files_lobsterai_server.go` + 路由 + `oauth_sessions.go` 归一化 + `auth_files_v8.go` |
 | 管理配额 | `internal/api/handlers/management/auth_files_lobsterai_server_quota.go`（`GET /v0|/v8/management/lobsterai-server-quota`，含 `total_credits` / `credit_packages` / 签到计数） |
 | 自动签到（可选） | `internal/checkin/lobsterai.go`（`NewLobsterAIAdapter`）+ `internal/checkin/capabilities.go` + `sdk/cliproxy/service_checkin.go`（默认关闭） |
-| 执行器 | `internal/runtime/executor/lobsterai_server_executor.go` + `lobsterai_server_helpers.go` |
+| 执行器 | `internal/runtime/executor/lobsterai_server_executor.go` + `lobsterai_server_helpers.go`（`lobsteraiServerApplyEnterpriseHeaders` 在 `PrepareRequest` 与推理路径各调一次） |
 | 执行器绑定 | `sdk/cliproxy/service_executors.go` (`case constant.LobsteraiServer`) |
 | 模型目录探测 | `sdk/cliproxy/lobsterai_server_models.go` + `service_models.go` + `service_lifecycle.go` |
 | 静态回退目录 | `internal/registry/model_definitions.go` + `internal/registry/models/models.json`（`"lobsterai-server": []`）+ `catalog_sources.go` |
@@ -213,7 +251,10 @@ const withKeyfromBody = (body) => ({ ...body, ...buildKeyfromPayload() });
 
 1. **不同账号的模型集合不同**（付费/订阅账号的 `accessible` 集合更大）：本实现按账号实时目录注册，未硬编码。免费账号 2026-10-15 为 7 个、2026-11-09 为 19 个，随账号状态变化。
 2. `accessToken` 寿命：由 JWT `exp` 推导（本账号约 30 天，`exp-iat=2592000`），刷新链路已按 `refreshToken` 实现但**未在真实过期后实测**。
-3. 企业账号上下文头（`getEnterpriseAccountHeaders`）：**unknown**，本实现仅发送 token + 两个客户端头。
+3. ~~企业账号上下文头（`getEnterpriseAccountHeaders`）：**unknown**~~ **已解决（2026-11-09）**：
+   两个头的名称与取值、上下文端点、归一化规则、终态/瞬态业务码区分均 source-confirmed 并实现（§4b）。
+   仍未实测的是**企业账号本身**：本账号是个人账号，只验证了「个人不发送这两个头」这一侧；
+   企业侧（真实 `enterprise_id` 下发、企业池计费）无账号可测。
 4. `/messages` 的 40300 是否对**所有**账号生效（而非仅免费账号）：仅本账号实测。
 5. ~~签到活动接口返回 `slotState:empty`~~ **已解决并实测（2026-10-15）**：`slotState:empty` 是查询串里 `platform=cli` 造成的。后端把 `platform` 当作运行环境判别字段，只接受 `win32`/`darwin`/`linux`；非法值（如 `cli`）静默返回空槽位。修正为按 `runtime.GOOS` 发送真实平台后，管理端点实测 `activity_available:true`、`activity_code:daily-check-in-evergreen-prod-20260814`（见 §9 验证表）。
 6. 前缀/别名/排除等共享管线未做账号级实测（走的是既有通用代码路径）。
@@ -244,6 +285,10 @@ const withKeyfromBody = (body) => ({ ...body, ...buildKeyfromPayload() });
 | `FetchCreditSummary` 解析 | **live 实测**：`total=200 known=true user="123318"`；`packages=2` 均为 `type=campaign / label=每日登录奖励 / label_en=Daily Login Reward`，`remaining` 各 100，`expires` 分别为 `2026-11-14T16:41:26`、`2026-11-15T00:44:15`；分桶合计 200 与总额一致 |
 | 模型目录（2026-11-09 复测） | 19 个 `accessible=true`（含 `kimi-k3`），全部 `apiFormat=openai`，`contextWindow` 256k–1M |
 | 签到适配器 | 单测 11 项：已签→`already_done` 且**不重发 POST**、可签→`success` 且断言 `configRevision`/`idempotencyKey`/空 `payload`、`51104`→`already_done`、`completed`→`already_done`、空槽位→`unavailable`、业务错误码→`failed`（消息带码）、缺凭据/异 provider→`blocked`、Identity、capability 登记 |
+| 企业上下文（live） | **实测（2026-11-09）**：`FetchEnterpriseContext` → `(nil, nil)`（个人账号），故两个企业头均不发；证明端点存在且信封可解析 |
+| 企业上下文（单测） | 归一化：个人模式 / 非正整数 id / 缺名 / 未知 role / 半成品载荷 → 无上下文；嵌套键可解析。终态码 `41600`/`41602`/`41612` → `(nil, nil)`；`41601` 与 5xx 与缺业务码 → 报错（不抹掉已知上下文）。`SetEnterpriseContext` 拒绝不完整身份并能清除既有身份 |
+| 企业头下发 | 执行器 `PrepareRequest` 单测：个人/仅 mode/仅 id 三种不完整形态都**不发**头；完整形态发 `enterprise` + id。客户端侧单测：额度读、活动读带同一对头 |
+| 活动 platform | 单测：`ActivityPlatformFor` 三个 Electron 主机正映射、未知主机（`freebsd`/`plan9`/空）→ 空串；槽位请求默认按主机映射、凭据 `activity_platform` 覆盖生效且清空后回落。**live**：本机映射 `windows→win32`，槽位 `slotState=available` |
 | 签到脚本 | `docs/scripts/lobsterai_server_checkin.py` 实测签到成功：`creditsGranted=100`，`periodKey=2026-10-15`；重跑返回「今日已签到」不重复领取；`profile-summary` 新增 `每日登录奖励 +100.0` |
 | 已知与本改动无关的失败 | `sdk/cliproxy` 的 `TestRegisterModelsForAuthCodeBuddyCNOAuthIgnoresAPIKeyModels` 在干净 HEAD 上即失败（已用 stash 复现），非本改动引入 |
 

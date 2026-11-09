@@ -216,7 +216,14 @@ func (h *Handler) completeLobsteraiServerLogin(state, code, errParam string) err
 	} else {
 		user = mergeLobsteraiServerUser(user, profile)
 	}
-	record := buildLobsteraiServerRecord(token, user, quota)
+	// An enterprise account must send its identity on every request, so the
+	// context is read once here and persisted with the credential. Failure leaves
+	// the account personal, which is the correct default for the common case.
+	enterprise, errEnterprise := client.FetchEnterpriseContext(ctx, token.AccessToken)
+	if errEnterprise != nil {
+		log.Warnf("LobsterAI enterprise context fetch failed: %v", errEnterprise)
+	}
+	record := buildLobsteraiServerRecord(token, user, quota, enterprise)
 	if errGuard := guardOAuthSessionPendingForSave(state, lobsteraiserverauth.Provider); errGuard != nil {
 		return errGuard
 	}
@@ -231,7 +238,7 @@ func (h *Handler) completeLobsteraiServerLogin(state, code, errParam string) err
 
 // buildLobsteraiServerRecord assembles the persisted credential from the
 // exchanged token and account identity.
-func buildLobsteraiServerRecord(token *lobsteraiserverauth.TokenData, user *lobsteraiserverauth.User, quota *lobsteraiserverauth.Quota) *coreauth.Auth {
+func buildLobsteraiServerRecord(token *lobsteraiserverauth.TokenData, user *lobsteraiserverauth.User, quota *lobsteraiserverauth.Quota, enterprise *lobsteraiserverauth.EnterpriseContext) *coreauth.Auth {
 	fileName := lobsteraiServerRecordFileName(user)
 	metadata := map[string]any{
 		"type":           lobsteraiserverauth.Provider,
@@ -275,6 +282,21 @@ func buildLobsteraiServerRecord(token *lobsteraiserverauth.TokenData, user *lobs
 		}
 		if quota.PurchasedCredits > 0 {
 			metadata["purchased_credits"] = quota.PurchasedCredits
+		}
+	}
+	// A personal account persists no enterprise identity, which is what makes the
+	// proxy omit the two enterprise headers on its requests.
+	if enterprise != nil && enterprise.EnterpriseID != "" {
+		metadata["account_mode"] = lobsteraiserverauth.AccountModeEnterprise
+		metadata["enterprise_id"] = enterprise.EnterpriseID
+		if enterprise.EnterpriseName != "" {
+			metadata["enterprise_name"] = enterprise.EnterpriseName
+		}
+		if enterprise.Role != "" {
+			metadata["enterprise_role"] = enterprise.Role
+		}
+		if enterprise.MemberID != "" {
+			metadata["enterprise_member_id"] = enterprise.MemberID
 		}
 	}
 

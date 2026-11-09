@@ -67,6 +67,12 @@ type LobsteraiServerQuota struct {
 	// ClaimedDays and ClaimedCredits are the activity's own running counters.
 	ClaimedDays    int64   `json:"claimed_days,omitempty"`
 	ClaimedCredits float64 `json:"claimed_credits,omitempty"`
+
+	// AccountMode is the credential's account mode ("enterprise" once the account
+	// joined an enterprise). Informational: it explains which enterprise headers
+	// the proxy sends on the account's behalf, and is absent for a personal
+	// account, which sends none.
+	AccountMode string `json:"account_mode,omitempty"`
 }
 
 // LobsteraiServerCreditPackage is one credit bucket behind the account total.
@@ -105,6 +111,14 @@ func (h *Handler) GetLobsteraiServerQuota(c *gin.Context) {
 
 	backendURL := lobsteraiServerQuotaBaseURL(auth)
 	client := lobsteraiserverauth.NewClientWithProxyURL(h.cfg, auth.ProxyURL, backendURL)
+	// The backend scopes an enterprise account to its pool from these headers, so
+	// the management read must present the same identity as the client's requests.
+	client.SetKeyfromIdentity("", "", lobsteraiServerQuotaField(auth, "client_version"), "")
+	client.SetEnterpriseContext(
+		lobsteraiServerQuotaField(auth, "account_mode"),
+		lobsteraiServerQuotaField(auth, "enterprise_id"),
+	)
+	client.SetActivityPlatform(lobsteraiServerQuotaField(auth, "activity_platform"))
 
 	quota, errQuota := client.FetchQuota(c.Request.Context(), accessToken)
 	if errQuota != nil {
@@ -117,6 +131,7 @@ func (h *Handler) GetLobsteraiServerQuota(c *gin.Context) {
 		Credits:            quota.Credits,
 		CreditsKnown:       quota.CreditsKnown,
 		PurchasedCredits:   quota.PurchasedCredits,
+		AccountMode:        lobsteraiServerQuotaField(auth, "account_mode"),
 	}
 	// The credit summary is best-effort like the activity read below: a failure
 	// there must not hide the free-tier balance, and an absent total stays
@@ -192,6 +207,29 @@ func lobsteraiServerQuotaBaseURL(auth *coreauth.Auth) string {
 		}
 	}
 	return lobsteraiserverauth.DefaultBackendURL
+}
+
+// lobsteraiServerQuotaField reads a trimmed credential field from attributes,
+// then metadata.
+func lobsteraiServerQuotaField(auth *coreauth.Auth, keys ...string) string {
+	if auth == nil {
+		return ""
+	}
+	for _, key := range keys {
+		if auth.Attributes != nil {
+			if value := strings.TrimSpace(auth.Attributes[key]); value != "" {
+				return value
+			}
+		}
+		if auth.Metadata != nil {
+			if value, ok := auth.Metadata[key].(string); ok {
+				if trimmed := strings.TrimSpace(value); trimmed != "" {
+					return trimmed
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // lobsteraiServerQuotaString reads the first non-empty string field.

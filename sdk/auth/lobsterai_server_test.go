@@ -17,7 +17,7 @@ func TestLobsteraiServerTokenMetadataPersistsRefreshableCredential(t *testing.T)
 		ExpiresAt:    time.Unix(1_800_000_000, 0),
 	}
 	user := &lobsteraiserverauth.User{ID: "u1", Email: "a@b.c", Name: "Ann"}
-	metadata := lobsteraiServerTokenMetadata(token, user, nil)
+	metadata := lobsteraiServerTokenMetadata(token, user, nil, nil)
 
 	if metadata["access_token"] != "acc-1" || metadata["refresh_token"] != "ref-1" {
 		t.Fatalf("metadata missing tokens: %+v", metadata)
@@ -40,7 +40,7 @@ func TestLobsteraiServerTokenMetadataKeepsUnknownCreditsAbsent(t *testing.T) {
 	token := &lobsteraiserverauth.TokenData{AccessToken: "acc-1"}
 	metadata := lobsteraiServerTokenMetadata(token, &lobsteraiserverauth.User{ID: "u1"}, &lobsteraiserverauth.Quota{
 		SubscriptionStatus: "free",
-	})
+	}, nil)
 	if metadata["subscription_status"] != "free" {
 		t.Fatalf("subscription_status = %v", metadata["subscription_status"])
 	}
@@ -54,6 +54,7 @@ func TestLobsteraiServerTokenMetadataReportsKnownCredits(t *testing.T) {
 		&lobsteraiserverauth.TokenData{AccessToken: "acc-1"},
 		&lobsteraiserverauth.User{ID: "u1"},
 		&lobsteraiserverauth.Quota{Credits: 42, CreditsKnown: true},
+		nil,
 	)
 	if metadata["quota_remaining"] != int64(42) {
 		t.Fatalf("quota_remaining = %v", metadata["quota_remaining"])
@@ -106,5 +107,47 @@ func TestMergeLobsteraiServerUserFillsMissingFields(t *testing.T) {
 	}
 	if merged.Email != "a@b.c" || merged.Name != "Ann" {
 		t.Fatalf("merged = %+v", merged)
+	}
+}
+
+func TestLobsteraiServerTokenMetadataRecordsTheEnterpriseIdentity(t *testing.T) {
+	token := &lobsteraiserverauth.TokenData{AccessToken: "acc-1"}
+
+	// A personal account persists no enterprise identity, which is what keeps the
+	// two enterprise headers off every subsequent request.
+	personal := lobsteraiServerTokenMetadata(token, &lobsteraiserverauth.User{ID: "u1"}, nil, nil)
+	for _, key := range []string{"account_mode", "enterprise_id", "enterprise_name", "enterprise_role"} {
+		if _, present := personal[key]; present {
+			t.Fatalf("%s must stay absent for a personal account: %+v", key, personal)
+		}
+	}
+
+	enterprise := lobsteraiServerTokenMetadata(token, &lobsteraiserverauth.User{ID: "u1"}, nil, &lobsteraiserverauth.EnterpriseContext{
+		AccountMode:    lobsteraiserverauth.AccountModeEnterprise,
+		EnterpriseID:   "1001",
+		EnterpriseName: "Example Enterprise",
+		Role:           "super_admin",
+		MemberID:       "7",
+	})
+	if enterprise["account_mode"] != lobsteraiserverauth.AccountModeEnterprise {
+		t.Fatalf("account_mode = %v", enterprise["account_mode"])
+	}
+	if enterprise["enterprise_id"] != "1001" {
+		t.Fatalf("enterprise_id = %v", enterprise["enterprise_id"])
+	}
+	if enterprise["enterprise_name"] != "Example Enterprise" || enterprise["enterprise_role"] != "super_admin" {
+		t.Fatalf("enterprise metadata = %+v", enterprise)
+	}
+	if enterprise["enterprise_member_id"] != "7" {
+		t.Fatalf("enterprise_member_id = %v", enterprise["enterprise_member_id"])
+	}
+
+	// A context without an id must not be persisted: the proxy would then send the
+	// account-mode header with an empty id.
+	incomplete := lobsteraiServerTokenMetadata(token, &lobsteraiserverauth.User{ID: "u1"}, nil, &lobsteraiserverauth.EnterpriseContext{
+		AccountMode: lobsteraiserverauth.AccountModeEnterprise,
+	})
+	if _, present := incomplete["enterprise_id"]; present {
+		t.Fatalf("enterprise_id must stay absent: %+v", incomplete)
 	}
 }

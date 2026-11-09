@@ -228,3 +228,71 @@ func TestLobsterAIIsAdvertisedAsACapability(t *testing.T) {
 		t.Fatal("lobsterai-server is missing from Capabilities()")
 	}
 }
+
+// lobsterAIAccountWith builds an account whose credential carries extra fields.
+func lobsterAIAccountWith(backendURL string, extra map[string]string) *coreauth.Auth {
+	auth := lobsterAIAccount(backendURL)
+	for key, value := range extra {
+		auth.Attributes[key] = value
+	}
+	return auth
+}
+
+func TestLobsterAICheckinSendsTheCredentialPlatformAndIdentity(t *testing.T) {
+	backend := &lobsterAIBackend{
+		slot:    lobsterAIOpenSlot(),
+		context: lobsterAIClaimableContext(),
+		claim:   map[string]any{"code": 0, "data": map[string]any{"result": map[string]any{"creditsGranted": 100.0}}},
+	}
+	var platform, mode, enterpriseID string
+	server := newLobsterAIBackend(t, backend)
+	inner := server.Config.Handler
+	server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/client-activities/slot") {
+			platform = r.URL.Query().Get("platform")
+			mode = r.Header.Get(lobsteraiserver.HeaderAccountMode)
+			enterpriseID = r.Header.Get(lobsteraiserver.HeaderEnterpriseID)
+		}
+		inner.ServeHTTP(w, r)
+	})
+
+	// The host mapping would send this host's own platform; an explicit value must
+	// win, and the enterprise pair must reach the activity surface too.
+	auth := lobsterAIAccountWith(server.URL, map[string]string{
+		"activity_platform": "darwin",
+		"account_mode":      lobsteraiserver.AccountModeEnterprise,
+		"enterprise_id":     "1001",
+	})
+	got := lobsterAIAdapter{}.CheckIn(context.Background(), &config.Config{}, auth, nil, "2026-10-15")
+	if got.Outcome != OutcomeSuccess {
+		t.Fatalf("outcome = %q (%s)", got.Outcome, got.Message)
+	}
+	if platform != "darwin" {
+		t.Fatalf("platform = %q, want the credential override", platform)
+	}
+	if mode != lobsteraiserver.AccountModeEnterprise || enterpriseID != "1001" {
+		t.Fatalf("enterprise headers = %q %q", mode, enterpriseID)
+	}
+	if got.Warning != "" {
+		t.Fatalf("warning = %q, want none when the platform is explicit", got.Warning)
+	}
+}
+
+func TestLobsterAIPlatformWarningFlagsAnUnknownHost(t *testing.T) {
+	auth := lobsterAIAccount("http://127.0.0.1:1")
+	// A host the client could never have sent must be reported, not hidden.
+	if warning := lobsterAIPlatformWarningFor("freebsd", auth); warning == "" {
+		t.Fatal("an unmappable host must produce a warning")
+	}
+	// An explicit value silences it.
+	withOverride := lobsterAIAccountWith("http://127.0.0.1:1", map[string]string{"activity_platform": "win32"})
+	if warning := lobsterAIPlatformWarningFor("freebsd", withOverride); warning != "" {
+		t.Fatalf("warning = %q, want none with an override", warning)
+	}
+	// A mapped host needs no warning.
+	for _, goos := range []string{"windows", "darwin", "linux"} {
+		if warning := lobsterAIPlatformWarningFor(goos, auth); warning != "" {
+			t.Fatalf("%s: warning = %q", goos, warning)
+		}
+	}
+}

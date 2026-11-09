@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -107,4 +108,31 @@ func TestLiveModelsAndQuota(t *testing.T) {
 		t.Fatalf("FetchUserProfile: %v", errProfile)
 	}
 	t.Logf("profile id=%q email=%q name=%q", profile.ID, profile.Email, profile.Name)
+
+	// The enterprise context decides whether the two enterprise headers are sent.
+	// A personal account must answer nil with no error, which is what keeps the
+	// proxy from claiming an enterprise identity it does not have.
+	enterprise, errEnterprise := client.FetchEnterpriseContext(ctx, cred.AccessToken)
+	if errEnterprise != nil {
+		t.Fatalf("FetchEnterpriseContext: %v", errEnterprise)
+	}
+	if enterprise == nil {
+		t.Log("enterprise context: none (personal account; no enterprise headers are sent)")
+	} else {
+		t.Logf("enterprise context: id=%q name=%q role=%q member=%q",
+			enterprise.EnterpriseID, enterprise.EnterpriseName, enterprise.Role, enterprise.MemberID)
+	}
+
+	// The activity read must carry a platform the backend recognizes.
+	platform := ActivityPlatformFor(runtime.GOOS)
+	t.Logf("activity platform for %s = %q", runtime.GOOS, platform)
+	if platform == "" {
+		t.Fatal("this host has no platform the activity surface recognizes")
+	}
+	snapshot, errSnapshot := client.FetchActivitySnapshot(ctx, cred.AccessToken, "", 0)
+	if errSnapshot != nil {
+		t.Fatalf("FetchActivitySnapshot: %v", errSnapshot)
+	}
+	t.Logf("activity slot=%q code=%q revision=%d available=%v",
+		snapshot.SlotState, snapshot.ActivityCode, snapshot.ConfigRevision, snapshot.Available())
 }

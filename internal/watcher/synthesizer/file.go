@@ -379,6 +379,15 @@ func synthesizeFileAuths(ctx *SynthesisContext, fullPath string, data []byte) ([
 				a.Attributes["access_token"] = strings.TrimSpace(token)
 			}
 		}
+		// The enterprise identity is persisted only for an enterprise account; its
+		// absence on a personal account is what keeps the two enterprise headers
+		// off the wire.
+		if mode, _ := metadata["account_mode"].(string); strings.TrimSpace(mode) != "" {
+			a.Attributes["account_mode"] = strings.TrimSpace(mode)
+		}
+		if enterpriseID, _ := metadata["enterprise_id"].(string); strings.TrimSpace(enterpriseID) != "" {
+			a.Attributes["enterprise_id"] = strings.TrimSpace(enterpriseID)
+		}
 	}
 	if provider == constant.QoderCN || provider == constant.QoderAI {
 		a.Attributes[coreauth.AttributeAuthKind] = coreauth.AuthKindOAuth

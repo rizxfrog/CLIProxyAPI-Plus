@@ -87,6 +87,27 @@ func lobsteraiServerAttributeString(auth *cliproxyauth.Auth, key string) string 
 	return ""
 }
 
+// lobsteraiServerApplyEnterpriseHeaders adds the account's enterprise identity.
+//
+// The backend scopes an enterprise account to its pool using this pair, and the
+// desktop client sends it on every authenticated request. A personal account has
+// no context, so neither header is sent: a fabricated id would scope the request
+// to a pool the account is not a member of.
+func lobsteraiServerApplyEnterpriseHeaders(req *http.Request, auth *cliproxyauth.Auth) {
+	if req == nil {
+		return
+	}
+	if !strings.EqualFold(lobsteraiServerAttributeString(auth, "account_mode"), lobsteraiserverauth.AccountModeEnterprise) {
+		return
+	}
+	enterpriseID := lobsteraiServerAttributeString(auth, "enterprise_id")
+	if enterpriseID == "" {
+		return
+	}
+	req.Header.Set(lobsteraiserverauth.HeaderAccountMode, lobsteraiserverauth.AccountModeEnterprise)
+	req.Header.Set(lobsteraiserverauth.HeaderEnterpriseID, enterpriseID)
+}
+
 // lobsteraiServerUpstreamError classifies a non-2xx upstream response with the
 // OpenAI-compatible status/retry semantics so the manager's cooldown policy sees
 // the real status and Retry-After.

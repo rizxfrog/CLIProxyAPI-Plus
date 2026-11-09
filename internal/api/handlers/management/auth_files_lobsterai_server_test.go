@@ -60,7 +60,7 @@ func TestLobsteraiServerManagementRecordPersistsCredential(t *testing.T) {
 	if errExchange != nil {
 		t.Fatalf("ExchangeCode: %v", errExchange)
 	}
-	record := buildLobsteraiServerRecord(token, user, quota)
+	record := buildLobsteraiServerRecord(token, user, quota, nil)
 	if record.Provider != lobsteraiserverauth.Provider {
 		t.Fatalf("provider = %q", record.Provider)
 	}
@@ -110,7 +110,7 @@ func TestLobsteraiServerManagementRecordPersistsCredential(t *testing.T) {
 func TestLobsteraiServerManagementRecordKeepsUnknownCreditsAbsent(t *testing.T) {
 	token := &lobsteraiserverauth.TokenData{AccessToken: "acc-1"}
 	quota := &lobsteraiserverauth.Quota{SubscriptionStatus: "free", CreditsKnown: false}
-	record := buildLobsteraiServerRecord(token, &lobsteraiserverauth.User{ID: "u1"}, quota)
+	record := buildLobsteraiServerRecord(token, &lobsteraiserverauth.User{ID: "u1"}, quota, nil)
 	if _, present := record.Metadata["quota_remaining"]; present {
 		t.Fatalf("quota_remaining must stay absent when unknown: %+v", record.Metadata)
 	}

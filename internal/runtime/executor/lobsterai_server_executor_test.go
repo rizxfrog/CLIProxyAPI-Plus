@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -232,5 +233,40 @@ func TestLobsteraiServerCountTokensEstimates(t *testing.T) {
 	}
 	if len(resp.Payload) == 0 {
 		t.Fatal("CountTokens() returned an empty payload")
+	}
+}
+
+func TestLobsteraiServerEnterpriseHeadersFollowTheCredential(t *testing.T) {
+	// The backend scopes an enterprise account to its pool from this header pair,
+	// so the inference path must present it — and a personal account must send
+	// neither header rather than an empty one.
+	base := map[string]string{"access_token": "acct-token", "base_url": lobsteraiserverauth.DefaultProxyBaseURL}
+	for name, tt := range map[string]struct {
+		extra map[string]string
+		mode  string
+		id    string
+	}{
+		"personal":   {extra: nil},
+		"enterprise": {extra: map[string]string{"account_mode": "enterprise", "enterprise_id": "1001"}, mode: "enterprise", id: "1001"},
+		"mode only":  {extra: map[string]string{"account_mode": "enterprise"}},
+		"id only":    {extra: map[string]string{"enterprise_id": "1001"}},
+	} {
+		attrs := map[string]string{}
+		for key, value := range base {
+			attrs[key] = value
+		}
+		for key, value := range tt.extra {
+			attrs[key] = value
+		}
+		req := httptest.NewRequest(http.MethodPost, "http://upstream.invalid/chat/completions", nil)
+		if errPrepare := (&LobsteraiServerExecutor{}).PrepareRequest(req, &cliproxyauth.Auth{Attributes: attrs}); errPrepare != nil {
+			t.Fatalf("%s: PrepareRequest: %v", name, errPrepare)
+		}
+		if got := req.Header.Get(lobsteraiserverauth.HeaderAccountMode); got != tt.mode {
+			t.Fatalf("%s: account mode header = %q, want %q", name, got, tt.mode)
+		}
+		if got := req.Header.Get(lobsteraiserverauth.HeaderEnterpriseID); got != tt.id {
+			t.Fatalf("%s: enterprise id header = %q, want %q", name, got, tt.id)
+		}
 	}
 }

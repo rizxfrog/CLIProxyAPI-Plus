@@ -199,6 +199,15 @@ waitForCallback:
 		log.Warnf("lobsterai-server: user profile fetch failed: %v", errProfile)
 	}
 
+	// An enterprise account must send its identity on every request, so the
+	// context is read once at login and persisted with the credential. Failure is
+	// not fatal: the account then behaves as personal, which is the correct
+	// default for the common case.
+	enterprise, errEnterprise := client.FetchEnterpriseContext(ctx, token.AccessToken)
+	if errEnterprise != nil {
+		log.Warnf("lobsterai-server: enterprise context fetch failed: %v", errEnterprise)
+	}
+
 	fileName := lobsteraiServerFileName(user)
 	fmt.Printf("LobsterAI authentication successful (%s)\n", lobsteraiServerLabel(user))
 
@@ -207,7 +216,7 @@ waitForCallback:
 		Provider:   lobsteraiserverauth.Provider,
 		FileName:   fileName,
 		Label:      lobsteraiServerLabel(user),
-		Metadata:   lobsteraiServerTokenMetadata(token, user, quota),
+		Metadata:   lobsteraiServerTokenMetadata(token, user, quota, enterprise),
 		Attributes: lobsteraiServerAttributes(token),
 	}, nil
 }
@@ -226,7 +235,7 @@ func lobsteraiServerAttributes(token *lobsteraiserverauth.TokenData) map[string]
 
 // lobsteraiServerTokenMetadata builds the persisted credential metadata. The
 // schema matches what internal/watcher/synthesizer rehydrates on restart.
-func lobsteraiServerTokenMetadata(token *lobsteraiserverauth.TokenData, user *lobsteraiserverauth.User, quota *lobsteraiserverauth.Quota) map[string]any {
+func lobsteraiServerTokenMetadata(token *lobsteraiserverauth.TokenData, user *lobsteraiserverauth.User, quota *lobsteraiserverauth.Quota, enterprise *lobsteraiserverauth.EnterpriseContext) map[string]any {
 	metadata := map[string]any{
 		"type":           lobsteraiserverauth.Provider,
 		"auth_kind":      "oauth",
@@ -247,7 +256,30 @@ func lobsteraiServerTokenMetadata(token *lobsteraiserverauth.TokenData, user *lo
 	}
 	applyLobsteraiServerUserMetadata(metadata, user)
 	applyLobsteraiServerQuotaMetadata(metadata, quota)
+	applyLobsteraiServerEnterpriseMetadata(metadata, enterprise)
 	return metadata
+}
+
+// applyLobsteraiServerEnterpriseMetadata records the joined-enterprise identity.
+//
+// A personal account carries no such fields, which is what makes the proxy omit
+// the two enterprise headers: the absence of a persisted context is the signal,
+// not an empty string that could be mistaken for an id.
+func applyLobsteraiServerEnterpriseMetadata(metadata map[string]any, enterprise *lobsteraiserverauth.EnterpriseContext) {
+	if metadata == nil || enterprise == nil || enterprise.EnterpriseID == "" {
+		return
+	}
+	metadata["account_mode"] = lobsteraiserverauth.AccountModeEnterprise
+	metadata["enterprise_id"] = enterprise.EnterpriseID
+	if enterprise.EnterpriseName != "" {
+		metadata["enterprise_name"] = enterprise.EnterpriseName
+	}
+	if enterprise.Role != "" {
+		metadata["enterprise_role"] = enterprise.Role
+	}
+	if enterprise.MemberID != "" {
+		metadata["enterprise_member_id"] = enterprise.MemberID
+	}
 }
 
 // applyLobsteraiServerUserMetadata adds the account identity fields.

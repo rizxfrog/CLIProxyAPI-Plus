@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"runtime"
 	"strings"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/auth/lobsteraiserver"
@@ -48,10 +49,43 @@ func (lobsterAIAdapter) Identity(auth *coreauth.Auth) string {
 // RequiredMetadata lists the credential fields addressable from a check-in
 // request header template.
 func (lobsterAIAdapter) RequiredMetadata() []string {
-	return []string{"access_token", "user_id", "backend_url", "client_version"}
+	return []string{"access_token", "user_id", "backend_url", "client_version", "account_mode", "enterprise_id", "activity_platform"}
 }
 
 func (lobsterAIAdapter) CheckIn(ctx context.Context, cfg *config.Config, auth *coreauth.Auth, _ http.Header, day string) Result {
+	result := lobsterAICheckIn(ctx, cfg, auth, day)
+	if result.Warning != "" {
+		return result
+	}
+	if warning := lobsterAIPlatformWarning(auth); warning != "" {
+		result.Warning = warning
+	}
+	return result
+}
+
+// lobsterAIPlatformWarning reports a host the backend cannot be told about.
+//
+// The activity surface only recognizes the desktop client's own process.platform
+// values (win32/darwin/linux) and answers an empty slot for anything else. On any
+// other host the adapter falls back to "linux", which is a guess: it is reported
+// rather than hidden, and `activity_platform` overrides it.
+func lobsterAIPlatformWarning(auth *coreauth.Auth) string {
+	return lobsterAIPlatformWarningFor(runtime.GOOS, auth)
+}
+
+// lobsterAIPlatformWarningFor is the pure form of lobsterAIPlatformWarning.
+func lobsterAIPlatformWarningFor(goos string, auth *coreauth.Auth) string {
+	if lobsterAIAttribute(auth, "activity_platform") != "" {
+		return ""
+	}
+	if lobsteraiserver.ActivityPlatformFor(goos) != "" {
+		return ""
+	}
+	return fmt.Sprintf("activity platform is unknown for %s; sent linux instead (set activity_platform to override)", goos)
+}
+
+// lobsterAICheckIn performs the check-in protocol.
+func lobsterAICheckIn(ctx context.Context, cfg *config.Config, auth *coreauth.Auth, day string) Result {
 	if auth == nil || !strings.EqualFold(strings.TrimSpace(auth.Provider), constant.LobsteraiServer) {
 		return Result{Outcome: OutcomeBlocked, Message: "lobsterai-server: account unavailable"}
 	}
@@ -61,6 +95,11 @@ func (lobsterAIAdapter) CheckIn(ctx context.Context, cfg *config.Config, auth *c
 	}
 	client := lobsteraiserver.NewClientWithProxyURL(cfg, auth.ProxyURL, lobsterAIAttribute(auth, "backend_url"))
 	client.SetKeyfromIdentity("", "", lobsterAIAttribute(auth, "client_version"), "")
+	// An enterprise account must present its identity on every request, and the
+	// host's own GOOS is not always an environment the backend recognizes, so both
+	// are taken from the credential when it carries them.
+	client.SetEnterpriseContext(lobsterAIAttribute(auth, "account_mode"), lobsterAIAttribute(auth, "enterprise_id"))
+	client.SetActivityPlatform(lobsterAIAttribute(auth, "activity_platform"))
 
 	snapshot, errSnapshot := client.FetchActivitySnapshot(
 		ctx,

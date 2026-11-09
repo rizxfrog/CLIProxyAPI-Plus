@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -544,5 +545,226 @@ func TestActivitySnapshotExposesTheClaimState(t *testing.T) {
 	// not be reported as claimable.
 	if (&ActivitySnapshot{SlotState: "available", ActivityCode: "x"}).Available() {
 		t.Fatal("a zero config revision must not be claimable")
+	}
+}
+
+func TestActivityPlatformForMapsOnlyElectronHosts(t *testing.T) {
+	// The backend only recognizes the desktop client's own process.platform
+	// values; anything else makes it answer an empty slot.
+	for goos, want := range map[string]string{
+		"windows": "win32",
+		"darwin":  "darwin",
+		"linux":   "linux",
+		"Windows": "win32",
+	} {
+		if got := ActivityPlatformFor(goos); got != want {
+			t.Fatalf("ActivityPlatformFor(%q) = %q, want %q", goos, got, want)
+		}
+	}
+	// An unrecognized host must not be reported as a platform the client could
+	// have sent.
+	for _, goos := range []string{"freebsd", "plan9", "", "  "} {
+		if got := ActivityPlatformFor(goos); got != "" {
+			t.Fatalf("ActivityPlatformFor(%q) = %q, want empty", goos, got)
+		}
+	}
+}
+
+func TestActivitySlotSendsTheResolvedPlatform(t *testing.T) {
+	var platforms []string
+	var enterpriseMode, enterpriseID string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/api/client-activities/slot") {
+			http.NotFound(w, r)
+			return
+		}
+		platforms = append(platforms, r.URL.Query().Get("platform"))
+		enterpriseMode = r.Header.Get(HeaderAccountMode)
+		enterpriseID = r.Header.Get(HeaderEnterpriseID)
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"slotState": "empty"}})
+	}))
+	defer server.Close()
+
+	client := NewClientWithProxyURL(&config.Config{}, "", server.URL)
+	if _, errSlot := client.FetchActivitySnapshot(context.Background(), "acc-1", "", 0); errSlot != nil {
+		t.Fatalf("FetchActivitySnapshot: %v", errSlot)
+	}
+	if got := platforms[0]; got != ActivityPlatformFor(runtime.GOOS) {
+		t.Fatalf("platform = %q, want the host mapping", got)
+	}
+	// A personal account sends neither enterprise header.
+	if enterpriseMode != "" || enterpriseID != "" {
+		t.Fatalf("enterprise headers leaked: %q %q", enterpriseMode, enterpriseID)
+	}
+
+	// An explicit override wins over the host, and an enterprise context adds the
+	// two headers to the activity read as well.
+	client.SetActivityPlatform("darwin")
+	client.SetEnterpriseContext(AccountModeEnterprise, "1001")
+	if _, errSlot := client.FetchActivitySnapshot(context.Background(), "acc-1", "", 0); errSlot != nil {
+		t.Fatalf("FetchActivitySnapshot: %v", errSlot)
+	}
+	if got := platforms[1]; got != "darwin" {
+		t.Fatalf("overridden platform = %q", got)
+	}
+	if enterpriseMode != AccountModeEnterprise || enterpriseID != "1001" {
+		t.Fatalf("enterprise headers = %q %q", enterpriseMode, enterpriseID)
+	}
+
+	// Clearing the override restores the host mapping.
+	client.SetActivityPlatform("  ")
+	if _, errSlot := client.FetchActivitySnapshot(context.Background(), "acc-1", "", 0); errSlot != nil {
+		t.Fatalf("FetchActivitySnapshot: %v", errSlot)
+	}
+	if got := platforms[2]; got != ActivityPlatformFor(runtime.GOOS) {
+		t.Fatalf("platform after clearing = %q", got)
+	}
+}
+
+func TestSetEnterpriseContextRejectsAnIncompleteIdentity(t *testing.T) {
+	newClient := func() *Client { return NewClientWithProxyURL(nil, "", DefaultBackendURL) }
+	for _, tt := range []struct {
+		name string
+		mode string
+		id   string
+	}{
+		{"personal mode", AccountModePersonal, "1001"},
+		{"empty mode", "", "1001"},
+		{"enterprise without id", AccountModeEnterprise, "  "},
+	} {
+		client := newClient()
+		client.SetEnterpriseContext(tt.mode, tt.id)
+		if client.accountMode != "" || client.enterpriseID != "" {
+			t.Fatalf("%s: context = %q %q, want empty", tt.name, client.accountMode, client.enterpriseID)
+		}
+	}
+	client := newClient()
+	client.SetEnterpriseContext(AccountModeEnterprise, "1001")
+	client.SetEnterpriseContext(AccountModePersonal, "")
+	if client.accountMode != "" || client.enterpriseID != "" {
+		t.Fatal("a later personal context must clear the previous enterprise one")
+	}
+}
+
+func TestEnterpriseHeadersAreSentOnAuthenticatedRequests(t *testing.T) {
+	var mode, id string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mode, id = r.Header.Get(HeaderAccountMode), r.Header.Get(HeaderEnterpriseID)
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"credits": 1}})
+	}))
+	defer server.Close()
+
+	client := NewClientWithProxyURL(nil, "", server.URL)
+	client.SetEnterpriseContext(AccountModeEnterprise, "1001")
+	if _, errQuota := client.FetchQuota(context.Background(), "acc-1"); errQuota != nil {
+		t.Fatalf("FetchQuota: %v", errQuota)
+	}
+	if mode != AccountModeEnterprise || id != "1001" {
+		t.Fatalf("enterprise headers = %q %q", mode, id)
+	}
+}
+
+func TestFetchEnterpriseContextParsesTheIdentity(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/enterprise/context" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code": 0, "message": "success",
+			"data": map[string]any{
+				"accountMode":    AccountModeEnterprise,
+				"enterpriseId":   float64(1001),
+				"memberId":       float64(7),
+				"enterpriseName": "Example Enterprise",
+				"role":           "super_admin",
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClientWithProxyURL(&config.Config{}, "", server.URL)
+	enterprise, errContext := client.FetchEnterpriseContext(context.Background(), "acc-1")
+	if errContext != nil {
+		t.Fatalf("FetchEnterpriseContext: %v", errContext)
+	}
+	if enterprise == nil {
+		t.Fatal("expected an enterprise context")
+	}
+	if enterprise.EnterpriseID != "1001" || enterprise.MemberID != "7" || enterprise.Role != "super_admin" {
+		t.Fatalf("context = %+v", enterprise)
+	}
+	if enterprise.EnterpriseName != "Example Enterprise" {
+		t.Fatalf("enterprise name = %q", enterprise.EnterpriseName)
+	}
+}
+
+func TestEnterpriseContextIsRejectedWhenIncomplete(t *testing.T) {
+	// A half-populated payload must not produce a header pair that scopes requests
+	// to an enterprise the account may not belong to.
+	for name, data := range map[string]map[string]any{
+		"personal mode":     {"accountMode": AccountModePersonal, "enterpriseId": float64(1001), "enterpriseName": "X", "role": "member"},
+		"non-positive id":   {"enterpriseId": float64(0), "enterpriseName": "X", "role": "member"},
+		"missing name":      {"enterpriseId": float64(1001), "role": "member"},
+		"unknown role":      {"enterpriseId": float64(1001), "enterpriseName": "X", "role": "owner"},
+		"empty payload":     {},
+		"id as a big float": {"enterpriseId": 1.5, "enterpriseName": "X", "role": "member"},
+	} {
+		if got := parseEnterpriseContext(data); got != nil {
+			t.Fatalf("%s: context = %+v, want nil", name, got)
+		}
+	}
+	// A nested payload is accepted, as the backend nests it differently across
+	// surfaces.
+	nested := map[string]any{"data": map[string]any{"enterpriseContext": map[string]any{
+		"enterpriseId": "1001", "enterpriseName": "X", "role": "member",
+	}}}
+	if got := parseEnterpriseContext(nested); got == nil || got.EnterpriseID != "1001" {
+		t.Fatalf("nested context = %+v", got)
+	}
+}
+
+func TestFetchEnterpriseContextDistinguishesTerminalFromTransient(t *testing.T) {
+	status := 0
+	code := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if status != 0 {
+			w.WriteHeader(status)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": code, "message": "nope"})
+	}))
+	defer server.Close()
+	client := NewClientWithProxyURL(nil, "", server.URL)
+
+	// Terminal codes mean the account has no context any more: clear it, and treat
+	// the answer as a normal "personal account" rather than a failure.
+	for _, terminal := range []int{EnterpriseErrorNotFound, EnterpriseErrorNotMember, EnterpriseErrorAccountModeMismatch} {
+		code, status = terminal, 200
+		enterprise, errContext := client.FetchEnterpriseContext(context.Background(), "acc-1")
+		if errContext != nil || enterprise != nil {
+			t.Fatalf("code %d: context=%+v err=%v", terminal, enterprise, errContext)
+		}
+	}
+
+	// Anything else must not erase a known context, so it is reported as an error.
+	code, status = 41601, 200
+	if _, errContext := client.FetchEnterpriseContext(context.Background(), "acc-1"); errContext == nil {
+		t.Fatal("a transient business code must be reported as an error")
+	}
+	code, status = 0, http.StatusInternalServerError
+	if _, errContext := client.FetchEnterpriseContext(context.Background(), "acc-1"); errContext == nil {
+		t.Fatal("a 5xx must be reported as an error")
+	}
+	// A response without the envelope is a failure, not a personal account.
+	code, status = 0, 200
+	empty := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"unexpected":true}`))
+	}))
+	defer empty.Close()
+	if _, errContext := NewClientWithProxyURL(nil, "", empty.URL).FetchEnterpriseContext(context.Background(), "acc-1"); errContext == nil {
+		t.Fatal("a response without a business code must be an error")
+	}
+	if _, errContext := client.FetchEnterpriseContext(context.Background(), "  "); errContext == nil {
+		t.Fatal("expected an error without an access token")
 	}
 }

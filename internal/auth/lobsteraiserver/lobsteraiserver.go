@@ -99,6 +99,25 @@ const (
 	// client always advertises these; the gateway gates some request shapes on it.
 	ClientCapabilities = "kimi-k3-agentic-v1,thinking-level-control-v1"
 
+	// HeaderAccountMode carries the account mode on every authenticated request
+	// once the client knows which enterprise the account belongs to. A personal
+	// account sends neither of the two enterprise headers.
+	HeaderAccountMode = "X-LobsterAI-Account-Mode"
+	// HeaderEnterpriseID carries the joined enterprise id, as a decimal string.
+	HeaderEnterpriseID = "X-LobsterAI-Enterprise-Id"
+
+	// AccountModePersonal and AccountModeEnterprise are the modes the backend
+	// reports. Only the enterprise mode carries an enterprise id.
+	AccountModePersonal   = "personal"
+	AccountModeEnterprise = "enterprise"
+
+	// Enterprise context business codes. The first three mean the account has no
+	// usable enterprise context, so a persisted one must be dropped; any other
+	// non-zero code is transient and must not erase a known context.
+	EnterpriseErrorNotFound            = 41600
+	EnterpriseErrorNotMember           = 41602
+	EnterpriseErrorAccountModeMismatch = 41612
+
 	// KeyfromOfficial is the default attribution channel for the public build.
 	KeyfromOfficial = "official"
 
@@ -146,13 +165,14 @@ type Model struct {
 
 // Endpoints groups the backend paths used during login, refresh and reads.
 type Endpoints struct {
-	Exchange      string
-	Refresh       string
-	UserProfile   string
-	Models        string
-	Quota         string
-	CreditSummary string
-	ActivitySlot  string
+	Exchange          string
+	Refresh           string
+	UserProfile       string
+	EnterpriseContext string
+	Models            string
+	Quota             string
+	CreditSummary     string
+	ActivitySlot      string
 	// ActivityContext is a prefix; the activity code and query are appended.
 	ActivityContext string
 }
@@ -160,14 +180,15 @@ type Endpoints struct {
 // DefaultEndpoints returns the backend paths observed in the client.
 func DefaultEndpoints() Endpoints {
 	return Endpoints{
-		Exchange:        "/api/auth/exchange",
-		Refresh:         "/api/auth/refresh",
-		UserProfile:     "/api/user/profile",
-		Models:          "/api/models/available",
-		Quota:           "/api/user/quota",
-		CreditSummary:   "/api/user/profile-summary",
-		ActivitySlot:    "/api/client-activities/slot",
-		ActivityContext: "/api/client-activities",
+		Exchange:          "/api/auth/exchange",
+		Refresh:           "/api/auth/refresh",
+		UserProfile:       "/api/user/profile",
+		EnterpriseContext: "/api/enterprise/context",
+		Models:            "/api/models/available",
+		Quota:             "/api/user/quota",
+		CreditSummary:     "/api/user/profile-summary",
+		ActivitySlot:      "/api/client-activities/slot",
+		ActivityContext:   "/api/client-activities",
 	}
 }
 
@@ -186,6 +207,23 @@ type User struct {
 	Name     string
 	Avatar   string
 	Nickname string
+}
+
+// EnterpriseContext is the account's joined-enterprise identity.
+//
+// The desktop client sends it as two request headers on every authenticated
+// call, and the backend uses the pair to scope the account to an enterprise
+// pool. A personal account has no context and sends neither header.
+type EnterpriseContext struct {
+	// AccountMode is "enterprise" for a context that was accepted.
+	AccountMode string
+	// EnterpriseID is the joined enterprise id, as a decimal string.
+	EnterpriseID string
+	// EnterpriseName and Role are informational (management display).
+	EnterpriseName string
+	Role           string
+	// MemberID is the account's id inside the enterprise.
+	MemberID string
 }
 
 // Quota is the normalized credential quota snapshot.
@@ -371,6 +409,13 @@ type Client struct {
 	latestKeyfrom string
 	version       string
 	uuid          string
+	// Enterprise context sent as two headers on authenticated requests. Empty
+	// for a personal account, which is the default.
+	accountMode  string
+	enterpriseID string
+	// activityPlatformOverride overrides the environment token sent to the
+	// activity surface (see SetActivityPlatform).
+	activityPlatformOverride string
 }
 
 // NewClient builds a proxy-aware client for the backend.
@@ -426,6 +471,9 @@ func (c *Client) SetEndpoints(endpoints Endpoints) {
 	if strings.TrimSpace(endpoints.UserProfile) != "" {
 		c.endpoints.UserProfile = endpoints.UserProfile
 	}
+	if strings.TrimSpace(endpoints.EnterpriseContext) != "" {
+		c.endpoints.EnterpriseContext = endpoints.EnterpriseContext
+	}
 	if strings.TrimSpace(endpoints.Models) != "" {
 		c.endpoints.Models = endpoints.Models
 	}
@@ -460,6 +508,42 @@ func (c *Client) SetKeyfromIdentity(first, latest, version, uuid string) {
 		c.version = trimmed
 	}
 	c.uuid = strings.TrimSpace(uuid)
+}
+
+// SetEnterpriseContext sets the enterprise identity sent as request headers.
+//
+// A personal account must call this with empty values (or not at all): sending a
+// fabricated enterprise id would scope the request to a pool the account is not
+// a member of. The id must therefore come from the backend's own context read.
+func (c *Client) SetEnterpriseContext(accountMode, enterpriseID string) {
+	if c == nil {
+		return
+	}
+	mode := strings.TrimSpace(accountMode)
+	id := strings.TrimSpace(enterpriseID)
+	if !strings.EqualFold(mode, AccountModeEnterprise) || id == "" {
+		c.accountMode = ""
+		c.enterpriseID = ""
+		return
+	}
+	c.accountMode = AccountModeEnterprise
+	c.enterpriseID = id
+}
+
+// SetActivityPlatform overrides the environment token sent to the activity
+// surface.
+//
+// The desktop client sends its own process.platform (win32 / darwin / linux),
+// and the backend treats any other value as an unrecognized environment and
+// answers an empty slot. A proxy host is not always one of those three, and an
+// operator may also know which environment the account was set up for, so an
+// explicit value wins over the host mapping. An empty value restores the host
+// default.
+func (c *Client) SetActivityPlatform(platform string) {
+	if c == nil {
+		return
+	}
+	c.activityPlatformOverride = strings.TrimSpace(platform)
 }
 
 // keyfromPayload builds the attribution fields the upstream expects on login and
@@ -689,6 +773,128 @@ func (c *Client) FetchUserProfile(ctx context.Context, accessToken string) (*Use
 	return parseUser(data), nil
 }
 
+// FetchEnterpriseContext reads the account's joined-enterprise context.
+//
+// A nil context with a nil error is a normal answer meaning the account is
+// personal (or is no longer a member of its enterprise): the caller must clear
+// any persisted enterprise identity rather than keep sending a stale one.
+// Errors are reserved for outcomes that must not erase a known context, which
+// mirrors the desktop client keeping its last valid context on a transient
+// failure.
+func (c *Client) FetchEnterpriseContext(ctx context.Context, accessToken string) (*EnterpriseContext, error) {
+	accessToken = strings.TrimSpace(accessToken)
+	if accessToken == "" {
+		return nil, fmt.Errorf("lobsterai-server: access token is required")
+	}
+	body, status, errGet := c.getJSON(ctx, c.backendURL+c.endpoints.EnterpriseContext, accessToken)
+	if errGet != nil {
+		return nil, errGet
+	}
+	payload := decodeJSONObject(body)
+	if payload == nil {
+		return nil, fmt.Errorf("lobsterai-server: empty enterprise context response: %s", summarizeBody(body))
+	}
+	// An absent business code is a failure, not "personal": this endpoint always
+	// answers the envelope, so its absence means an unexpected shape.
+	code, codePresent := firstNumeric(payload, "code")
+	if !codePresent {
+		return nil, fmt.Errorf("lobsterai-server: enterprise context response has no business code: %s", summarizeBody(body))
+	}
+	if code != 0 {
+		switch int64(code) {
+		case EnterpriseErrorNotFound, EnterpriseErrorNotMember, EnterpriseErrorAccountModeMismatch:
+			// Terminal: this account has no usable enterprise context any more.
+			return nil, nil
+		}
+		message := firstNonEmpty(readString(payload, "message"), readString(payload, "msg"))
+		if message == "" {
+			message = "unknown error"
+		}
+		return nil, fmt.Errorf("lobsterai-server: enterprise context failed (code %d): %s", int64(code), message)
+	}
+	if status < 200 || status >= 300 {
+		return nil, fmt.Errorf("lobsterai-server: enterprise context failed with status %d: %s", status, summarizeBody(body))
+	}
+	data, _ := payload["data"].(map[string]any)
+	return parseEnterpriseContext(data), nil
+}
+
+// parseEnterpriseContext normalizes the enterprise context payload.
+//
+// It mirrors the desktop client's rules: an explicit personal mode, or a payload
+// without a usable identity, yields no context. The id must be a positive
+// integer, and the name and role must be present, so a half-populated payload
+// cannot produce a header pair that scopes requests to an enterprise the account
+// may not belong to.
+func parseEnterpriseContext(data map[string]any) *EnterpriseContext {
+	candidate := enterpriseContextCandidate(data)
+	if candidate == nil {
+		return nil
+	}
+	enterpriseID := positiveIntString(candidate["enterpriseId"])
+	enterpriseName := readString(candidate, "enterpriseName")
+	role := strings.ToLower(readString(candidate, "role"))
+	if enterpriseID == "" || enterpriseName == "" || (role != "super_admin" && role != "member") {
+		return nil
+	}
+	return &EnterpriseContext{
+		AccountMode:    AccountModeEnterprise,
+		EnterpriseID:   enterpriseID,
+		EnterpriseName: enterpriseName,
+		Role:           role,
+		MemberID:       positiveIntString(candidate["memberId"]),
+	}
+}
+
+// enterpriseContextCandidate finds the object carrying the enterprise identity.
+//
+// The backend nests it differently across surfaces (directly, or under one of
+// several wrapper keys), and an explicit personal mode anywhere in the chain
+// means the account is not an enterprise account.
+func enterpriseContextCandidate(value map[string]any) map[string]any {
+	if value == nil {
+		return nil
+	}
+	if strings.EqualFold(readString(value, "accountMode"), AccountModePersonal) {
+		return nil
+	}
+	if value["enterpriseId"] != nil && readString(value, "enterpriseName") != "" {
+		return value
+	}
+	for _, key := range []string{"enterpriseContext", "accountContext", "organizationContext", "context", "user", "data"} {
+		nested := decodeJSONObjectField(value, key)
+		if nested == nil {
+			continue
+		}
+		if candidate := enterpriseContextCandidate(nested); candidate != nil {
+			return candidate
+		}
+	}
+	return nil
+}
+
+// positiveIntString reads a positive integer identity as a decimal string.
+// A zero or negative id is rejected the same way the client rejects it.
+func positiveIntString(value any) string {
+	switch typed := value.(type) {
+	case string:
+		parsed, errParse := strconv.ParseInt(strings.TrimSpace(typed), 10, 64)
+		if errParse == nil && parsed > 0 {
+			return strconv.FormatInt(parsed, 10)
+		}
+	case float64:
+		if typed > 0 && typed == float64(int64(typed)) {
+			return strconv.FormatInt(int64(typed), 10)
+		}
+	case json.Number:
+		parsed, errParse := typed.Int64()
+		if errParse == nil && parsed > 0 {
+			return strconv.FormatInt(parsed, 10)
+		}
+	}
+	return ""
+}
+
 // FetchModels reads the account's model catalogue with the access token.
 // Entitlement is decided by the backend; the returned list is the routable
 // candidate set for this credential.
@@ -773,16 +979,17 @@ const ActivityPlacementDesktopSidebar = "desktop_sidebar"
 // desktop client advertises when reading the daily check-in slot.
 const ActivityContainerAPIVersionDailyCheckIn = 2
 
-// activityPlatform reports the platform token the desktop client sends when it
-// reads an activity slot.
+// ActivityPlatformFor maps a Go GOOS to the platform token the desktop client
+// sends (its own process.platform: win32 / darwin / linux).
 //
-// The backend treats this as an environment discriminator, not a channel name:
-// the desktop client's electron `process.platform` values (win32/darwin/linux)
-// return the real activity, while an unrecognized value such as "cli" makes the
-// backend answer an empty slot. Sending "cli" is therefore a silent no-op that
-// hides every activity, so this must mirror the running host.
-func activityPlatform() string {
-	switch runtime.GOOS {
+// Only those three are meaningful to the backend, which treats the value as an
+// environment discriminator and answers an empty slot for anything else (an
+// unrecognized token such as "cli" hides every activity). An unknown GOOS
+// therefore yields "" rather than a fabricated "linux", so a caller can supply
+// an explicit override and report the gap instead of silently claiming an
+// environment the host is not.
+func ActivityPlatformFor(goos string) string {
+	switch strings.ToLower(strings.TrimSpace(goos)) {
 	case "windows":
 		return "win32"
 	case "darwin":
@@ -790,8 +997,22 @@ func activityPlatform() string {
 	case "linux":
 		return "linux"
 	default:
-		return "linux"
+		return ""
 	}
+}
+
+// activityPlatform resolves the platform token for this client: an explicit
+// override wins, then the host mapping, then the closest recognized environment.
+func (c *Client) activityPlatform() string {
+	if c != nil && c.activityPlatformOverride != "" {
+		return c.activityPlatformOverride
+	}
+	if platform := ActivityPlatformFor(runtime.GOOS); platform != "" {
+		return platform
+	}
+	// This host has no Electron equivalent. "linux" is the nearest recognized
+	// environment, and SetActivityPlatform is how an operator corrects it.
+	return "linux"
 }
 
 // FetchActivitySnapshot reads the read-only state of one activity placement.
@@ -812,7 +1033,7 @@ func (c *Client) FetchActivitySnapshot(ctx context.Context, accessToken, placeme
 	query.Set("placement", placement)
 	query.Set("clientVersion", c.version)
 	query.Set("containerApiVersion", strconv.Itoa(containerAPIVersion))
-	query.Set("platform", activityPlatform())
+	query.Set("platform", c.activityPlatform())
 	snapshot := &ActivitySnapshot{Placement: placement}
 	endpoint := c.backendURL + c.endpoints.ActivitySlot + "?" + query.Encode()
 	body, status, errGet := c.getJSON(ctx, endpoint, accessToken)
@@ -974,6 +1195,12 @@ func (c *Client) doJSONURL(ctx context.Context, method, endpoint string, payload
 	req.Header.Set("User-Agent", UserAgent)
 	req.Header.Set("X-LobsterAI-Client-Capabilities", ClientCapabilities)
 	req.Header.Set("X-LobsterAI-Client-Version", c.version)
+	// The enterprise pair is sent on every authenticated request once known; a
+	// personal account has none and therefore sends neither header.
+	if strings.EqualFold(c.accountMode, AccountModeEnterprise) && c.enterpriseID != "" {
+		req.Header.Set(HeaderAccountMode, AccountModeEnterprise)
+		req.Header.Set(HeaderEnterpriseID, c.enterpriseID)
+	}
 	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

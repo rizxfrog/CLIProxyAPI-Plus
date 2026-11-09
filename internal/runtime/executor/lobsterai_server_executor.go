@@ -87,6 +87,7 @@ func (e *LobsteraiServerExecutor) PrepareRequest(req *http.Request, auth *clipro
 	req.Header.Set("X-LobsterAI-Client-Capabilities", lobsteraiserverauth.ClientCapabilities)
 	req.Header.Set("X-LobsterAI-Client-Version", lobsteraiServerClientVersion(auth))
 	req.Header.Set("User-Agent", lobsteraiserverauth.UserAgent)
+	lobsteraiServerApplyEnterpriseHeaders(req, auth)
 	var attrs map[string]string
 	if auth != nil {
 		attrs = auth.Attributes
@@ -452,6 +453,7 @@ func (e *LobsteraiServerExecutor) applyHeaders(httpReq *http.Request, auth *clip
 	httpReq.Header.Set("X-LobsterAI-Client-Capabilities", lobsteraiserverauth.ClientCapabilities)
 	httpReq.Header.Set("X-LobsterAI-Client-Version", lobsteraiServerClientVersion(auth))
 	httpReq.Header.Set("User-Agent", lobsteraiserverauth.UserAgent)
+	lobsteraiServerApplyEnterpriseHeaders(httpReq, auth)
 	accept := "application/json"
 	if stream {
 		accept = "text/event-stream"
