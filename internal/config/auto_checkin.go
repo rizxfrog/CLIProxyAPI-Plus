@@ -105,7 +105,9 @@ func (c AutoCheckinConfig) Validate() error {
 			return fmt.Errorf("automation.checkin.providers.%s: timezone must be an IANA name", provider)
 		}
 		if _, err := time.LoadLocation(effective.Timezone); err != nil {
-			return fmt.Errorf("automation.checkin.providers.%s: invalid timezone", provider)
+			// Name the value: an operator who typed a lowercase or misspelled
+			// zone otherwise only learns that *something* is invalid.
+			return fmt.Errorf("automation.checkin.providers.%s: invalid timezone %q (expected an IANA name such as Asia/Shanghai)", provider, effective.Timezone)
 		}
 		start, err := checkinMinutes(effective.Window.Start, false)
 		if err != nil {

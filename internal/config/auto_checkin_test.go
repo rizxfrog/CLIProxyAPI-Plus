@@ -157,3 +157,37 @@ func TestAutoCheckinOmittedDefaultsRemainOmitted(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestAutoCheckinNamesTheOffendingTimezone pins that the timezone error carries
+// the rejected value. A bare "invalid timezone" leaves the operator unable to
+// tell which of several provider cards holds the bad value, and a lowercase or
+// misspelled zone is the common case the panel cannot catch on its own.
+func TestAutoCheckinNamesTheOffendingTimezone(t *testing.T) {
+	cases := []struct{ name, body, want string }{
+		{"unknown zone", "providers: {trae: {timezone: Mars/Unknown}}", `"Mars/Unknown"`},
+		{"lowercase zone", "providers: {codearts: {timezone: asia/shanghai}}", `"asia/shanghai"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var node yaml.Node
+			if err := yaml.Unmarshal([]byte(tc.body), &node); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			var cfg AutoCheckinConfig
+			if err := node.Decode(&cfg); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			errValidate := cfg.Validate()
+			if errValidate == nil {
+				t.Fatal("expected a validation error")
+			}
+			message := errValidate.Error()
+			if !strings.Contains(message, tc.want) {
+				t.Fatalf("message does not name the rejected zone: %q", message)
+			}
+			if !strings.Contains(message, "Asia/Shanghai") {
+				t.Fatalf("message does not show an example: %q", message)
+			}
+		})
+	}
+}
