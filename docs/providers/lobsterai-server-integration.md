@@ -138,6 +138,15 @@ const withKeyfromBody = (body) => ({ ...body, ...buildKeyfromPayload() });
   （`normalizeEnterpriseAccountContext`）；`accountMode: "personal"` 或字段不全 → 视为无上下文。
   嵌套位置在客户端有 6 个候选键（`enterpriseContext`/`accountContext`/`organizationContext`/`context`/`user`/`data`），
   本实现按同一顺序查找。
+- **个人账号的返回是「成功 + 明确说自己是个人」，不是错误码**（runtime-confirmed，2026-11-09）：
+
+  ```json
+  {"code":0,"message":"success","data":{"accountMode":"personal"}}
+  ```
+
+  即走 `accountMode == "personal"` 这条分支（与客户端 `findContextCandidate` 的
+  `if (directMode === Personal) return null` 完全一致），而不是走终态码分支。
+  本端点**不需要** `keyfrom` 查询串（实测直接用 Bearer 调用即返回上述结果）。
 - 业务码 `41600` NotFound / `41602` NotMember / `41612` AccountModeMismatch 是**终态**（清掉已有上下文）；
   其余非 0（如 `41601` Unavailable）只代表本次读失败，**不得**抹掉已知上下文。
 - 本实现：登录时（CLI 与管理端各一次）best-effort 读一次并写入凭据
@@ -285,7 +294,7 @@ const withKeyfromBody = (body) => ({ ...body, ...buildKeyfromPayload() });
 | `FetchCreditSummary` 解析 | **live 实测**：`total=200 known=true user="123318"`；`packages=2` 均为 `type=campaign / label=每日登录奖励 / label_en=Daily Login Reward`，`remaining` 各 100，`expires` 分别为 `2026-11-14T16:41:26`、`2026-11-15T00:44:15`；分桶合计 200 与总额一致 |
 | 模型目录（2026-11-09 复测） | 19 个 `accessible=true`（含 `kimi-k3`），全部 `apiFormat=openai`，`contextWindow` 256k–1M |
 | 签到适配器 | 单测 11 项：已签→`already_done` 且**不重发 POST**、可签→`success` 且断言 `configRevision`/`idempotencyKey`/空 `payload`、`51104`→`already_done`、`completed`→`already_done`、空槽位→`unavailable`、业务错误码→`failed`（消息带码）、缺凭据/异 provider→`blocked`、Identity、capability 登记 |
-| 企业上下文（live） | **实测（2026-11-09）**：`FetchEnterpriseContext` → `(nil, nil)`（个人账号），故两个企业头均不发；证明端点存在且信封可解析 |
+| 企业上下文（live） | **实测（2026-11-09）**：`GET /api/enterprise/context` → `{"code":0,"message":"success","data":{"accountMode":"personal"}}`；`FetchEnterpriseContext` → `(nil, nil)`（个人账号），故两个企业头均不发。走的是「明确个人模式」分支（与客户端一致），不是终态码分支 |
 | 企业上下文（单测） | 归一化：个人模式 / 非正整数 id / 缺名 / 未知 role / 半成品载荷 → 无上下文；嵌套键可解析。终态码 `41600`/`41602`/`41612` → `(nil, nil)`；`41601` 与 5xx 与缺业务码 → 报错（不抹掉已知上下文）。`SetEnterpriseContext` 拒绝不完整身份并能清除既有身份 |
 | 企业头下发 | 执行器 `PrepareRequest` 单测：个人/仅 mode/仅 id 三种不完整形态都**不发**头；完整形态发 `enterprise` + id。客户端侧单测：额度读、活动读带同一对头 |
 | 活动 platform | 单测：`ActivityPlatformFor` 三个 Electron 主机正映射、未知主机（`freebsd`/`plan9`/空）→ 空串；槽位请求默认按主机映射、凭据 `activity_platform` 覆盖生效且清空后回落。**live**：本机映射 `windows→win32`，槽位 `slotState=available` |

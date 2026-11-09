@@ -703,12 +703,15 @@ func TestEnterpriseContextIsRejectedWhenIncomplete(t *testing.T) {
 	// A half-populated payload must not produce a header pair that scopes requests
 	// to an enterprise the account may not belong to.
 	for name, data := range map[string]map[string]any{
-		"personal mode":     {"accountMode": AccountModePersonal, "enterpriseId": float64(1001), "enterpriseName": "X", "role": "member"},
-		"non-positive id":   {"enterpriseId": float64(0), "enterpriseName": "X", "role": "member"},
-		"missing name":      {"enterpriseId": float64(1001), "role": "member"},
-		"unknown role":      {"enterpriseId": float64(1001), "enterpriseName": "X", "role": "owner"},
-		"empty payload":     {},
-		"id as a big float": {"enterpriseId": 1.5, "enterpriseName": "X", "role": "member"},
+		"personal mode": {"accountMode": AccountModePersonal, "enterpriseId": float64(1001), "enterpriseName": "X", "role": "member"},
+		// The exact payload a personal account gets back from the live backend:
+		// success plus an explicit personal mode, with no enterprise fields.
+		"live personal payload": {"accountMode": AccountModePersonal},
+		"non-positive id":       {"enterpriseId": float64(0), "enterpriseName": "X", "role": "member"},
+		"missing name":          {"enterpriseId": float64(1001), "role": "member"},
+		"unknown role":          {"enterpriseId": float64(1001), "enterpriseName": "X", "role": "owner"},
+		"empty payload":         {},
+		"id as a big float":     {"enterpriseId": 1.5, "enterpriseName": "X", "role": "member"},
 	} {
 		if got := parseEnterpriseContext(data); got != nil {
 			t.Fatalf("%s: context = %+v, want nil", name, got)
