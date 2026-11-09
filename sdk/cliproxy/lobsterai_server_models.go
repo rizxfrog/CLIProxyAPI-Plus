@@ -244,6 +244,38 @@ func lobsteraiServerCatalogueModelInfo(auth *coreauth.Auth, entry lobsteraiserve
 	if entry.MaxTokens > 0 {
 		clone.MaxCompletionTokens = entry.MaxTokens
 	}
+	// Publishing the declared levels is what makes a client's reasoning effort
+	// reach the gateway: without model-level thinking metadata the shared pipeline
+	// leaves `reasoning_effort` out of the upstream body entirely, so every
+	// request silently ran at the backend default no matter what was asked for.
+	//
+	// The catalogue entry owns this metadata. The static registry is keyed by
+	// model id across every provider, so a coincidentally equal id (this channel
+	// and, say, the Kimi channel both ship "kimi-k3") would otherwise inherit a
+	// level list the LobsterAI backend never declared.
+	switch {
+	case !entry.Thinking:
+		// No thinking at all: an effort must not be forwarded.
+		clone.Thinking = nil
+	case len(entry.ReasoningLevels) == 0:
+		// The backend reports thinking but exposes no choice, so there is no
+		// vocabulary to validate against. An empty support record forwards exactly
+		// what the client asked for without inventing either a restriction or an
+		// allowance.
+		clone.Thinking = &registry.ThinkingSupport{}
+	default:
+		zeroAllowed := false
+		for _, level := range entry.ReasoningLevels {
+			if strings.EqualFold(level, "off") || strings.EqualFold(level, "none") {
+				zeroAllowed = true
+				break
+			}
+		}
+		clone.Thinking = &registry.ThinkingSupport{
+			ZeroAllowed: zeroAllowed,
+			Levels:      append([]string(nil), entry.ReasoningLevels...),
+		}
+	}
 	return &clone
 }
 

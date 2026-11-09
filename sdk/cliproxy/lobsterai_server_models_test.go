@@ -113,6 +113,69 @@ func TestLobsteraiServerCatalogueModelInfoSkipsBlankID(t *testing.T) {
 	}
 }
 
+// TestLobsteraiServerCatalogueModelInfoPublishesDeclaredThinking pins that the
+// backend's own reasoning vocabulary reaches the registry.
+//
+// Without model-level thinking metadata the shared pipeline leaves
+// `reasoning_effort` out of the upstream body entirely, so every request ran at
+// the backend default no matter which level the client asked for.
+func TestLobsteraiServerCatalogueModelInfoPublishesDeclaredThinking(t *testing.T) {
+	info := lobsteraiServerCatalogueModelInfo(nil, lobsteraiserverauth.Model{
+		ID:              "deepseek-v4-flash",
+		APIFormat:       "openai",
+		Thinking:        true,
+		ReasoningLevels: []string{"off", "high", "xhigh"},
+	})
+	if info == nil || info.Thinking == nil {
+		t.Fatalf("thinking metadata missing: %+v", info)
+	}
+	if got := info.Thinking.Levels; len(got) != 3 || got[0] != "off" || got[2] != "xhigh" {
+		t.Fatalf("levels = %+v", got)
+	}
+	// "off" is a real level here (the backend's own token), so a model that
+	// declares it can be switched off.
+	if !info.Thinking.ZeroAllowed {
+		t.Fatal("a declared off level must mark the model as disableable")
+	}
+	// The published slice must not alias the catalogue entry's backing array.
+	levels := []string{"off", "high"}
+	copied := lobsteraiServerCatalogueModelInfo(nil, lobsteraiserverauth.Model{
+		ID: "copy", Thinking: true, ReasoningLevels: levels,
+	})
+	levels[0] = "mutated"
+	if copied.Thinking.Levels[0] != "off" {
+		t.Fatalf("published levels alias the catalogue entry: %+v", copied.Thinking.Levels)
+	}
+}
+
+// TestLobsteraiServerCatalogueModelInfoOwnsItsThinkingMetadata pins that the
+// catalogue entry, not a same-named entry from another provider, decides this
+// channel's reasoning vocabulary.
+//
+// The static registry is keyed by model id across every provider, and ids such
+// as "kimi-k3" exist in several channels, so an inheriting clone would enforce
+// another provider's level list against this backend.
+func TestLobsteraiServerCatalogueModelInfoOwnsItsThinkingMetadata(t *testing.T) {
+	// Thinking reported, no levels declared: forward the client's choice without
+	// inventing a restriction, and replace anything inherited.
+	undeclared := lobsteraiServerCatalogueModelInfo(nil, lobsteraiserverauth.Model{
+		ID:       "kimi-k3",
+		Thinking: true,
+	})
+	if undeclared == nil || undeclared.Thinking == nil {
+		t.Fatalf("thinking metadata missing: %+v", undeclared)
+	}
+	if len(undeclared.Thinking.Levels) != 0 || undeclared.Thinking.ZeroAllowed {
+		t.Fatalf("undeclared levels must stay unconstrained: %+v", undeclared.Thinking)
+	}
+
+	// No thinking at all: an effort must not be forwarded.
+	plain := lobsteraiServerCatalogueModelInfo(nil, lobsteraiserverauth.Model{ID: "no-thinking"})
+	if plain == nil || plain.Thinking != nil {
+		t.Fatalf("non-thinking model carries metadata: %+v", plain.Thinking)
+	}
+}
+
 // TestLobsteraiServerCatalogueProbePublishesFetchedModels exercises the whole
 // probe path (fetch -> publish) against a mock, since the live catalogue is the
 // authoritative model source for this provider.

@@ -161,6 +161,16 @@ type Model struct {
 	RuntimeProfile string
 	ContextLimit   int
 	MaxTokens      int
+	// ReasoningLevels is the model's declared reasoning-effort vocabulary, taken
+	// from thinkingConfig.options[].openclawLevel.
+	//
+	// openclawLevel is the wire value of `reasoning_effort` (the product-side
+	// `level` is a different, display-only name: the strongest option is "max" in
+	// the UI but "xhigh" on the wire). Only the models that actually declare a
+	// thinkingConfig have this list; the rest report supportsThinking without
+	// exposing any choice, so an empty list means "no declared control" and not
+	// "no thinking".
+	ReasoningLevels []string
 }
 
 // Endpoints groups the backend paths used during login, refresh and reads.
@@ -1437,9 +1447,53 @@ func parseModels(raw any) []Model {
 			RuntimeProfile:      readString(entry, "runtimeProfile", "runtime_profile"),
 			ContextLimit:        int(readInt64(entry, "contextWindow", "context_window", "contextLength", "context_length", "contextLimit")),
 			MaxTokens:           int(readInt64(entry, "maxTokens", "max_tokens", "maxOutputTokens")),
+			ReasoningLevels:     parseReasoningLevels(entry),
 		})
 	}
 	return models
+}
+
+// parseReasoningLevels extracts the model's declared reasoning-effort wire values.
+//
+// The backend reports both a product-side `level` (off/minimal/…/max, used by its
+// own UI) and the `openclawLevel` it actually sends. Only the latter belongs in
+// `reasoning_effort`, and they differ exactly at the top of the scale: the UI
+// calls it "max" while the wire value is "xhigh". Sending the UI name would look
+// like it worked (the gateway answers 200) while quietly running at the default.
+//
+// A model with no usable options yields no levels, which keeps the request field
+// untouched rather than inventing a vocabulary the backend never declared.
+func parseReasoningLevels(entry map[string]any) []string {
+	config := decodeJSONObjectField(entry, "thinkingConfig")
+	if config == nil {
+		return nil
+	}
+	options, _ := config["options"].([]any)
+	if len(options) == 0 {
+		return nil
+	}
+	levels := make([]string, 0, len(options))
+	seen := make(map[string]struct{}, len(options))
+	for _, item := range options {
+		option, okOption := item.(map[string]any)
+		if !okOption {
+			continue
+		}
+		level := strings.TrimSpace(readString(option, "openclawLevel", "openclaw_level"))
+		if level == "" {
+			continue
+		}
+		key := strings.ToLower(level)
+		if _, duplicate := seen[key]; duplicate {
+			continue
+		}
+		seen[key] = struct{}{}
+		levels = append(levels, level)
+	}
+	if len(levels) == 0 {
+		return nil
+	}
+	return levels
 }
 
 func firstNonEmpty(values ...string) string {

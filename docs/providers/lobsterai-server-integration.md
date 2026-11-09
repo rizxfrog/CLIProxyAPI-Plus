@@ -168,6 +168,57 @@ const withKeyfromBody = (body) => ({ ...body, ...buildKeyfromPayload() });
   - 并提供凭据级覆盖 `activity_platform`，让运维显式声明该账号期望的环境。
 - 实测：本机 `ActivityPlatformFor("windows") == "win32"`，活动槽位 `slotState=available`（见 §9）。
 
+### 4d. 思考档位 (reasoning_effort) —— 2026-11-09 实测修正
+
+上游契约（`GET /api/models/available`，live）：
+
+```json
+"thinkingConfig": { "options": [ {"level":"off","openclawLevel":"off"},
+                                 {"level":"high","openclawLevel":"high"},
+                                 {"level":"max","openclawLevel":"xhigh"} ],
+                    "defaultLevel": "high" }
+```
+
+- `level` 是**产品侧展示名**，`openclawLevel` 才是 `reasoning_effort` 的 **wire 值**；两者只在最上档不同（UI 叫 `max`，wire 是 `xhigh`）。
+- 19 个 `accessible` 模型中只有 **7 个**声明了 `thinkingConfig`（wire 集合恒为 `off/high/xhigh`，产品集合 `off/high/max`，默认 `high` 或 `max`）；其余 12 个 `supportsThinking:true` 但**无档位表**。
+- 网关**不校验**该字段：`off/none/minimal/low/medium/high/xhigh/max` 实测**全部 200**。但**只有 `off` 真正关闭思考**（`off` 实测 reasoning_tokens 缺失，`none` 仍有 20 —— `none` 是空操作）。
+
+**已修缺陷**：目录探测发布的 `ModelInfo` 只填 `Object/Created/OwnedBy/ID`，没有 `Thinking` 元数据。
+思考管线按 **`toFormat`** 选 applier（本 provider 恒为 `openai` → OpenAI applier），而
+`resolveOpenAIEffort` 在 `modelInfo.Thinking == nil` 时直接 `return "", false` —— **不写字段**，
+于是 `reasoning_effort` 被静默丢弃，任何档位都跑在服务端默认。抓取上游真实请求体确认（修复前）：
+body 只有 `model,messages,stream`。
+
+**修复规则（目录条目是本频道的唯一权威）**：
+
+| 上游声明 | 发布的 `Thinking` | 效果 |
+| --- | --- | --- |
+| 有档位表 | `{Levels: <openclawLevel 列表>, ZeroAllowed: 含 off}` | 集合内**原样透传**；集合外**显式 400**（`valid levels: off, high, xhigh`） |
+| 仅 `supportsThinking` | `{}`（非 nil、空 Levels） | 客户端要什么发什么：不发明限制，也不发明许可 |
+| 无思考 | `nil` | 不转发 |
+
+- **交叉继承坑**：静态目录 `LookupStaticModelInfo(id)` 是**跨 provider 按 id 全局查**的，而
+  `kimi-k3` 同时存在于 `kimi`/`codebuddy-ai`/`xiaohuanxiong` 段。修复前 `clone := *info` 会继承
+  那个 provider 的档位表（例如 `xiaohuanxiong` 的 `[low, high]`），对本后端施加一份**无关的**校验。
+  现在三种情况都显式覆盖。
+
+验证（本地中转抓上游真实 body）：
+
+| 请求 | 修复前 | 修复后 |
+| --- | --- | --- |
+| `reasoning_effort: high`（已声明模型） | body **无**该字段 | `"high"` |
+| `off` | 无 | `"off"`（真正关闭） |
+| `xhigh` | 无 | `"xhigh"` |
+| `medium` / `max` | 无 | **400** `valid levels: off, high, xhigh` |
+| `kimi-k3` + `medium`（未声明档位） | 无 | `"medium"`（原样透传，不设限） |
+| `/v1/messages` + `thinking.budget_tokens` | 无 | `"high"`（canonical budget → 档位） |
+| `/v1/responses` + `reasoning.effort` | 无 | `"high"` |
+| 后缀 `deepseek-v4-flash(high)` | 无 | `"high"`（后缀语法是 `model(value)`，不是 `model-value`） |
+
+**已知非最优（未改共享层）**：canonical「关闭」（`thinking.type=disabled` / 后缀 `(none)`）会被管线映射成
+`"none"` —— 上游接受但**不生效**；要真正关闭需显式发 `off`。根因是 `standardLevelOrder` 里没有 `off`，
+`ZeroAllowed` 只能产出 `"none"`，这是共享思考层的语义，不是本 provider 能决定的。
+
 ## 5. 配额 / 积分 (Quota) — 只读观测，三者分离
 
 | 机制 | 含义 | 本实现 |
@@ -215,7 +266,7 @@ const withKeyfromBody = (body) => ({ ...body, ...buildKeyfromPayload() });
 | 自动签到（可选） | `internal/checkin/lobsterai.go`（`NewLobsterAIAdapter`）+ `internal/checkin/capabilities.go` + `sdk/cliproxy/service_checkin.go`（默认关闭） |
 | 执行器 | `internal/runtime/executor/lobsterai_server_executor.go` + `lobsterai_server_helpers.go`（`lobsteraiServerApplyEnterpriseHeaders` 在 `PrepareRequest` 与推理路径各调一次） |
 | 执行器绑定 | `sdk/cliproxy/service_executors.go` (`case constant.LobsteraiServer`) |
-| 模型目录探测 | `sdk/cliproxy/lobsterai_server_models.go` + `service_models.go` + `service_lifecycle.go` |
+| 模型目录探测 | `sdk/cliproxy/lobsterai_server_models.go` + `service_models.go` + `service_lifecycle.go`（`lobsteraiServerCatalogueModelInfo` 发布思考档位，见 §4d） |
 | 静态回退目录 | `internal/registry/model_definitions.go` + `internal/registry/models/models.json`（`"lobsterai-server": []`）+ `catalog_sources.go` |
 | 凭证再水合 | `internal/watcher/synthesizer/file.go` |
 | 常量 | `internal/constant/constant.go` (`LobsteraiServer`) |
@@ -299,6 +350,7 @@ const withKeyfromBody = (body) => ({ ...body, ...buildKeyfromPayload() });
 | 企业头下发 | 执行器 `PrepareRequest` 单测：个人/仅 mode/仅 id 三种不完整形态都**不发**头；完整形态发 `enterprise` + id。客户端侧单测：额度读、活动读带同一对头 |
 | 活动 platform | 单测：`ActivityPlatformFor` 三个 Electron 主机正映射、未知主机（`freebsd`/`plan9`/空）→ 空串；槽位请求默认按主机映射、凭据 `activity_platform` 覆盖生效且清空后回落。**live**：本机映射 `windows→win32`，槽位 `slotState=available` |
 | 签到脚本 | `docs/scripts/lobsterai_server_checkin.py` 实测签到成功：`creditsGranted=100`，`periodKey=2026-10-15`；重跑返回「今日已签到」不重复领取；`profile-summary` 新增 `每日登录奖励 +100.0` |
+| 思考档位 | **实测（2026-11-09，本地中转抓上游真实 body）**：修复前 `reasoning_effort` 在所有档位下都**不进**上游 body；修复后 `high`/`off`/`xhigh` 原样透传、`medium`/`max` 显式 400、未声明档位的模型原样透传、Claude budget 与 Responses `reasoning.effort` 与 `(high)` 后缀均映射到 `"high"`。明细见 §4d |
 | 已知与本改动无关的失败 | `sdk/cliproxy` 的 `TestRegisterModelsForAuthCodeBuddyCNOAuthIgnoresAPIKeyModels` 在干净 HEAD 上即失败（已用 stash 复现），非本改动引入 |
 
 ## 10. 自动签到 (两条路径)

@@ -771,3 +771,78 @@ func TestFetchEnterpriseContextDistinguishesTerminalFromTransient(t *testing.T) 
 		t.Fatal("expected an error without an access token")
 	}
 }
+
+func TestParseReasoningLevelsUsesTheWireVocabulary(t *testing.T) {
+	// The backend reports a product-side `level` (off/high/max) and the
+	// `openclawLevel` it actually sends (off/high/xhigh). Only the latter is a
+	// valid reasoning_effort value: sending the UI name "max" answers 200 but runs
+	// at the default, which is exactly the silent failure this pins.
+	levels := parseReasoningLevels(map[string]any{
+		"thinkingConfig": map[string]any{
+			"options": []any{
+				map[string]any{"level": "off", "openclawLevel": "off"},
+				map[string]any{"level": "high", "openclawLevel": "high"},
+				map[string]any{"level": "max", "openclawLevel": "xhigh"},
+			},
+			"defaultLevel": "high",
+		},
+	})
+	if len(levels) != 3 || levels[0] != "off" || levels[1] != "high" || levels[2] != "xhigh" {
+		t.Fatalf("levels = %+v", levels)
+	}
+	for _, level := range levels {
+		if level == "max" {
+			t.Fatalf("the product-side level leaked into the wire vocabulary: %+v", levels)
+		}
+	}
+}
+
+func TestParseReasoningLevelsHandlesMissingAndMalformedOptions(t *testing.T) {
+	for name, entry := range map[string]map[string]any{
+		"no thinkingConfig": {},
+		"no options":        {"thinkingConfig": map[string]any{"defaultLevel": "high"}},
+		"empty options":     {"thinkingConfig": map[string]any{"options": []any{}}},
+		"options without wire values": {"thinkingConfig": map[string]any{"options": []any{
+			map[string]any{"level": "high"},
+			"nonsense",
+		}}},
+	} {
+		if levels := parseReasoningLevels(entry); levels != nil {
+			t.Fatalf("%s: levels = %+v, want nil", name, levels)
+		}
+	}
+	// A duplicate wire value is reported once, and the first spelling wins.
+	deduped := parseReasoningLevels(map[string]any{"thinkingConfig": map[string]any{"options": []any{
+		map[string]any{"level": "max", "openclawLevel": "xhigh"},
+		map[string]any{"level": "max", "openclawLevel": "XHIGH"},
+	}}})
+	if len(deduped) != 1 || deduped[0] != "xhigh" {
+		t.Fatalf("deduped = %+v", deduped)
+	}
+}
+
+func TestParsedModelsCarryTheReasoningLevels(t *testing.T) {
+	raw := []any{
+		map[string]any{
+			"modelId": "declared", "accessible": true, "supportsThinking": true,
+			"thinkingConfig": map[string]any{"options": []any{
+				map[string]any{"level": "off", "openclawLevel": "off"},
+				map[string]any{"level": "high", "openclawLevel": "high"},
+			}},
+		},
+		map[string]any{"modelId": "undeclared", "accessible": true, "supportsThinking": true},
+	}
+	models := parseModels(raw)
+	if len(models) != 2 {
+		t.Fatalf("models = %+v", models)
+	}
+	if got := models[0].ReasoningLevels; len(got) != 2 || got[0] != "off" {
+		t.Fatalf("declared levels = %+v", got)
+	}
+	if models[1].ReasoningLevels != nil {
+		t.Fatalf("undeclared levels = %+v, want nil", models[1].ReasoningLevels)
+	}
+	if !models[1].Thinking {
+		t.Fatal("supportsThinking must still be recorded without options")
+	}
+}
