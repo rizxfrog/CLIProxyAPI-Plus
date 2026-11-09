@@ -232,6 +232,7 @@ Live evidence collected by running the freshly built server against a real Dumat
 | `GET /v8/management/provider-models` | 200; `dumate` section with 4 models |
 | `GET /v8/management/dumate-quota` | 200 with the live wallet: `available_points=5520.00`, `subscription_points=4993.91`, `bonus_points=520.00`, `expires_at` set |
 | `GET /v8/management/automation/checkin/providers` | 200; `dumate` listed alongside `codearts`, `codebuddy-cn`, `trae` |
+| Enabling the check-in provider | Was **422** `automation.checkin: unsupported provider "dumate"` until 2026-11-09 (the config allowlist had drifted); now `PUT /v8/management/config.yaml` with `dumate: {enabled: true}` returns **200** and the status endpoint reports it enabled |
 | Panel (`frontend/`) in a real browser | Auth Files banner, Quota Management tab (live wallet rendered), and the Automatic check-in Dumate card in both light and dark themes |
 
 Frontend checks: `bun test tests/dumateProvider.test.ts tests/dumateQuota.test.ts`, `bun run type-check`,
@@ -348,3 +349,11 @@ The provider is listed by `checkin.Capabilities()` and is **disabled by default*
 picks the timezone/window from the panel's Automatic check-in page. The panel needs no per-provider code: it
 renders one card per capability returned by
 `GET /v8/management/automation/checkin/providers`.
+
+**Correction (2026-11-09)**: being listed was not enough. The provider id lives in two lists —
+`checkin.Capabilities()` (which the panel renders) and the allowlist in
+`internal/config/auto_checkin.go` (`AutoCheckinConfig.Validate()`) — and the latter still named only
+`codearts/codebuddy-cn/trae`. Enabling Dumate therefore saved with
+`422 automation.checkin: unsupported provider "dumate"`. The allowlist now covers every built-in
+provider, `checkin.Capabilities()` and the adapter set come from one list
+(`checkin.BuiltinAdapters()`), and a test pins the two together.

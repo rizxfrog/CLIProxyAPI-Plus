@@ -10,10 +10,7 @@ func (s *Service) initCheckinService() *checkin.Service {
 		if s.coreManager != nil {
 			source = s.coreManager
 		}
-		s.checkinService = checkin.NewService(source,
-			checkin.NewCodeArtsAdapter(), checkin.NewCodeBuddyAdapter(),
-			checkin.NewDumateAdapter(), checkin.NewLobsterAIAdapter(),
-			checkin.NewTraeAdapter())
+		s.checkinService = checkin.NewService(source, checkin.BuiltinAdapters()...)
 	}
 	return s.checkinService
 }

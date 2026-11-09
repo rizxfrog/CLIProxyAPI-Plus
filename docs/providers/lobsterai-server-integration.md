@@ -345,6 +345,7 @@ body 只有 `model,messages,stream`。
 | `FetchCreditSummary` 解析 | **live 实测**：`total=200 known=true user="123318"`；`packages=2` 均为 `type=campaign / label=每日登录奖励 / label_en=Daily Login Reward`，`remaining` 各 100，`expires` 分别为 `2026-11-14T16:41:26`、`2026-11-15T00:44:15`；分桶合计 200 与总额一致 |
 | 模型目录（2026-11-09 复测） | 19 个 `accessible=true`（含 `kimi-k3`），全部 `apiFormat=openai`，`contextWindow` 256k–1M |
 | 签到适配器 | 单测 11 项：已签→`already_done` 且**不重发 POST**、可签→`success` 且断言 `configRevision`/`idempotencyKey`/空 `payload`、`51104`→`already_done`、`completed`→`already_done`、空槽位→`unavailable`、业务错误码→`failed`（消息带码）、缺凭据/异 provider→`blocked`、Identity、capability 登记 |
+| 签到**启用路径** | **实测（2026-11-09）**：`PUT /v8/management/config.yaml` 带 `automation.checkin.providers.lobsterai-server.enabled: true` → **200**；修复前是 422 `automation.checkin: unsupported provider "lobsterai-server"`（详见 §10a）。未知 provider 仍 422。`GET .../automation/checkin/status` → `lobsterai-server=true` |
 | 企业上下文（live） | **实测（2026-11-09）**：`GET /api/enterprise/context` → `{"code":0,"message":"success","data":{"accountMode":"personal"}}`；`FetchEnterpriseContext` → `(nil, nil)`（个人账号），故两个企业头均不发。走的是「明确个人模式」分支（与客户端一致），不是终态码分支 |
 | 企业上下文（单测） | 归一化：个人模式 / 非正整数 id / 缺名 / 未知 role / 半成品载荷 → 无上下文；嵌套键可解析。终态码 `41600`/`41602`/`41612` → `(nil, nil)`；`41601` 与 5xx 与缺业务码 → 报错（不抹掉已知上下文）。`SetEnterpriseContext` 拒绝不完整身份并能清除既有身份 |
 | 企业头下发 | 执行器 `PrepareRequest` 单测：个人/仅 mode/仅 id 三种不完整形态都**不发**头；完整形态发 `enterprise` + id。客户端侧单测：额度读、活动读带同一对头 |
@@ -363,6 +364,14 @@ body 只有 `model,messages,stream`。
 `internal/checkin` 的 `lobsterai-server` 适配器复用本仓库统一的签到框架（与 codearts /
 codebuddy-cn / dumate / trae 同一套调度器），**默认关闭**，由运维在管理面板的
 「自动签到」页显式启用并设置时区/窗口：
+
+> **启用路径的一个坑（2026-11-09 修）**：provider id 存在**两份清单** ——
+> `checkin.Capabilities()`（面板据此渲染卡片）与 `internal/config` 里的允许列表
+> （`AutoCheckinConfig.Validate()` 的 switch）。后者当时只写了
+> `codearts/codebuddy-cn/trae`，于是 `dumate` 与 `lobsterai-server` **能被列出、能被勾选，
+> 但保存时必然 422 `unsupported provider`**。两处现已由测试钉死（见 §9）。
+> 该 switch 是刻意的独立副本：`internal/config` 无法 import `internal/checkin`（会成环），
+> 且配置文件里的拼写错误必须响亮失败。
 
 - 先读 slot + context，`claimedToday` / `completed` / 业务码 `51104` 均映射为 `already_done`，
   **不会重复 POST**；

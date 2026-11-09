@@ -91,7 +91,7 @@ func (c AutoCheckinConfig) Validate() error {
 	sort.Strings(providers)
 	for _, provider := range providers {
 		switch provider {
-		case "codearts", "codebuddy-cn", "trae":
+		case "codearts", "codebuddy-cn", "dumate", "lobsterai-server", "trae":
 		default:
 			return fmt.Errorf("automation.checkin: unsupported provider %q", provider)
 		}
