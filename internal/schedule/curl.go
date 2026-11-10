@@ -269,6 +269,8 @@ type curlOptions struct {
 	jsonBody    bool
 	form        []FormField
 	follow      bool
+	// head records -I/--head, which asks for the headers only.
+	head bool
 }
 
 // parseCurlStatement turns one tokenized command into a normalized request.
@@ -345,6 +347,14 @@ func (o *curlOptions) applyLongFlag(name string, value func() (string, error)) e
 			return errValue
 		}
 		o.method = text
+	case "--url":
+		// Browsers and API clients export "--url" instead of a positional URL;
+		// it names the same thing.
+		text, errValue := value()
+		if errValue != nil {
+			return errValue
+		}
+		return o.setURL(text)
 	case "--header":
 		text, errValue := value()
 		if errValue != nil {
@@ -411,7 +421,10 @@ func (o *curlOptions) applyLongFlag(name string, value func() (string, error)) e
 		if _, errValue := value(); errValue != nil {
 			return errValue
 		}
-	case "--silent", "--show-error", "--include", "--head", "--verbose", "--insecure",
+	case "--head":
+		// Asks for the response headers only, which curl performs with HEAD.
+		o.head = true
+	case "--silent", "--show-error", "--include", "--verbose", "--insecure",
 		"--compressed", "--http1.1", "--http2", "--http2-prior-knowledge",
 		"--no-progress-meter", "--globoff":
 		// Accepted and ignored: they change only curl's own output or transport.
@@ -432,7 +445,11 @@ func (o *curlOptions) applyShortFlags(cluster string, tokens []string, index *in
 		case 'L':
 			o.follow = true
 			continue
-		case 's', 'S', 'i', 'I', 'v', 'k', 'g':
+		case 'I':
+			// -I asks for the response headers only, which curl performs with HEAD.
+			o.head = true
+			continue
+		case 's', 'S', 'i', 'v', 'k', 'g':
 			// Accepted and ignored: they change only curl's own output or transport.
 			continue
 		case 'X', 'H', 'd', 'F', 'u', 'b', 'A', 'e', 'o', 'w':
@@ -537,6 +554,9 @@ func (o *curlOptions) build() (CurlCommand, error) {
 		return CurlCommand{}, fmt.Errorf("command has no URL")
 	}
 	method := o.method
+	if method == "" && o.head {
+		method = "HEAD"
+	}
 	if method == "" && (len(o.data) > 0 || len(o.form) > 0) {
 		method = "POST"
 	}

@@ -218,9 +218,12 @@ func TestParseCurlsCommands(t *testing.T) {
 			}},
 		},
 		{
+			// Only flags that change curl's own output or transport belong here.
+			// -I/--head is deliberately absent: it asks for HEAD, which is a
+			// different request, not a cosmetic difference.
 			name: "ignored flags",
-			input: "curl -sS -k -i -I -v -g --compressed --http1.1 --http2 --http2-prior-knowledge " +
-				"--no-progress-meter --globoff --silent --include --head --verbose --insecure " +
+			input: "curl -sS -k -i -v -g --compressed --http1.1 --http2 --http2-prior-knowledge " +
+				"--no-progress-meter --globoff --silent --include --verbose --insecure " +
 				"-o /dev/null -w '%{http_code}' --output=/dev/null --write-out='%{time_total}' " +
 				"https://api.example.com/v1/items",
 			commands: []CurlCommand{{
@@ -542,4 +545,94 @@ func curlCommandsString(commands []CurlCommand) string {
 	}
 	builder.WriteString("]")
 	return builder.String()
+}
+
+// Browsers and API clients export "--url" instead of a positional URL. The blob
+// below is exactly what one such client produced, and it must convert.
+func TestParseCurlsAcceptsTheURLFlag(t *testing.T) {
+	input := `curl --request GET \
+  --url 'https://x-llm.net/api/verification?email=2433901595%40qq.com&turnstile=' \
+  --header 'accept: application/json, text/plain, */*' \
+  --header 'accept-language: zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6' \
+  --header 'cache-control: no-cache, no-store' \
+  --header 'priority: u=1, i' \
+  --header 'referer: https://x-llm.net/sign-up?aff=4KHa&utm_source=zuiquanapi' \
+  --header 'sec-ch-ua: "Not:A-Brand";v="8", "Chromium";v="156"' \
+  --header 'sec-ch-ua-mobile: ?0' \
+  --header 'sec-ch-ua-platform: "Windows"' \
+  --header 'sec-fetch-dest: empty' \
+  --header 'sec-fetch-mode: cors' \
+  --header 'sec-fetch-site: same-origin' \
+  --header 'user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36 Edg/156.0.0.0'`
+	commands, problems := ParseCurls(input)
+	if len(problems) != 0 {
+		t.Fatalf("ParseCurls reported %+v, want none", problems)
+	}
+	if len(commands) != 1 {
+		t.Fatalf("ParseCurls converted %d commands, want 1", len(commands))
+	}
+	want := curlRequest("GET",
+		"https://x-llm.net/api/verification?email=2433901595%40qq.com&turnstile=",
+		map[string]string{
+			"accept":             "application/json, text/plain, */*",
+			"accept-language":    "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
+			"cache-control":      "no-cache, no-store",
+			"priority":           "u=1, i",
+			"referer":            "https://x-llm.net/sign-up?aff=4KHa&utm_source=zuiquanapi",
+			"sec-ch-ua":          `"Not:A-Brand";v="8", "Chromium";v="156"`,
+			"sec-ch-ua-mobile":   "?0",
+			"sec-ch-ua-platform": `"Windows"`,
+			"sec-fetch-dest":     "empty",
+			"sec-fetch-mode":     "cors",
+			"sec-fetch-site":     "same-origin",
+			"user-agent":         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36 Edg/156.0.0.0",
+		}, "", nil, false)
+	if !reflect.DeepEqual(commands[0].Request, want) {
+		t.Fatalf("request =\n%+v\nwant\n%+v", commands[0].Request, want)
+	}
+	// The suggested name stays readable: method, host and path, no query.
+	if commands[0].Name != "GET x-llm.net/api/verification" {
+		t.Fatalf("Name = %q", commands[0].Name)
+	}
+}
+
+func TestParseCurlsURLFlagForms(t *testing.T) {
+	// The inline "--url=..." spelling names the same thing.
+	commands, problems := ParseCurls(`curl --url=https://api.example.com/x`)
+	if len(problems) != 0 || len(commands) != 1 {
+		t.Fatalf("inline --url: commands=%d problems=%+v", len(commands), problems)
+	}
+	if commands[0].Request.URL != "https://api.example.com/x" {
+		t.Fatalf("URL = %q", commands[0].Request.URL)
+	}
+	// "--url" and a positional URL are two URLs, which curl itself rejects.
+	_, problems = ParseCurls(`curl --url https://api.example.com/x https://api.example.com/y`)
+	if len(problems) != 1 || !strings.Contains(problems[0].Message, "more than one URL") {
+		t.Fatalf("two URLs reported %+v", problems)
+	}
+}
+
+// -I/--head asks for the response headers only, so it must not be treated as
+// cosmetic: ignoring it would silently send a GET instead of a HEAD.
+func TestParseCurlsHeadFlagSelectsHead(t *testing.T) {
+	for _, input := range []string{
+		`curl -I https://api.example.com/x`,
+		`curl --head https://api.example.com/x`,
+	} {
+		commands, problems := ParseCurls(input)
+		if len(problems) != 0 || len(commands) != 1 {
+			t.Fatalf("%q: commands=%d problems=%+v", input, len(commands), problems)
+		}
+		if commands[0].Request.Method != "HEAD" {
+			t.Fatalf("%q: Method = %q, want HEAD", input, commands[0].Request.Method)
+		}
+	}
+	// An explicit -X still wins, as it does in curl.
+	commands, problems := ParseCurls(`curl -I -X POST https://api.example.com/x`)
+	if len(problems) != 0 || len(commands) != 1 {
+		t.Fatalf("explicit -X: commands=%d problems=%+v", len(commands), problems)
+	}
+	if commands[0].Request.Method != "POST" {
+		t.Fatalf("Method = %q, want POST", commands[0].Request.Method)
+	}
 }

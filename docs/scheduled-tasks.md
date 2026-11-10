@@ -191,13 +191,20 @@ one task was added, and returns 400 with `added: 0` when none were.
 `&&`, and maps them onto a group's tasks: a group created from several commands gets one
 task per command.
 
-Supported: `-X/--request`, the positional URL, `-H/--header`, `-d/--data`,
+Supported: `-X/--request`, the positional URL, `--url`, `-H/--header`, `-d/--data`,
 `--data-raw`, `--data-binary`, `--data-urlencode`, `--json`, `-F/--form`,
 `--form-string`, `-u/--user`, `-b/--cookie`, `-A/--user-agent`, `-e/--referer`,
-`-L/--location`, and `\`-continuations. Silently ignored: `-s`, `-S`, `-i`, `-I`, `-v`,
-`-k`, `--compressed`, `--http1.1`, `--http2`, `--no-progress-meter`, `-o`, `-w`.
+`-L/--location`, `-I/--head`, and `\`-continuations. `--url` is the spelling
+browsers and API clients export, and names the same thing as a positional URL; as
+in curl, supplying both is an error. `-I/--head` requests the response headers
+only and therefore selects `HEAD` — an explicit `-X` still wins.
+Silently ignored, because they change only curl's own output or transport: `-s`,
+`-S`, `-i`, `-v`, `-k`, `-g`, `--compressed`, `--http1.1`, `--http2`,
+`--http2-prior-knowledge`, `--no-progress-meter`, `-o`, `-w`.
 
 Anything else is reported as an error for that command rather than guessed at.
+`--location-trusted` is one of those on purpose: it forwards credentials across a
+redirect, which a stored task cannot honour.
 
 `--data-urlencode` follows `curl`'s own three forms: `name=value`, `=value`, and a bare
 value that is encoded whole. `-u user:pass` becomes an `Authorization: Basic` header.
