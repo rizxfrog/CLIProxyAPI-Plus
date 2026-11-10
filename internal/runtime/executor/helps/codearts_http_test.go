@@ -235,3 +235,61 @@ func TestCodeArtsSessionIDIsStable(t *testing.T) {
 		t.Fatalf("explicit session id was ignored: %q", explicit)
 	}
 }
+
+// TestNewCodeArtsHTTPClientModeTypeHeader pins the fast-channel header.
+//
+// The desktop client mirrors a model's model_mode into x-mode-type. It travels
+// alongside maas_type and selects a different upstream channel, so dropping it
+// silently downgrades a fast model to the standard route.
+func TestNewCodeArtsHTTPClientModeTypeHeader(t *testing.T) {
+	codeartsauth.RegisterFastModel("GLM-5.2-FAST")
+
+	cases := []struct {
+		name     string
+		body     string
+		wantMode string
+	}{
+		{name: "fast model", body: `{"model":"GLM-5.2-FAST"}`, wantMode: codeartsauth.FastModelMode},
+		{name: "fast id case-insensitive", body: `{"model":"glm-5.2-fast"}`, wantMode: codeartsauth.FastModelMode},
+		{name: "standard model", body: `{"model":"GLM-5.2"}`, wantMode: ""},
+		{name: "no model field", body: `{"stream":true}`, wantMode: ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var sawMode string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				sawMode = r.Header.Get(CodeArtsModeTypeHeader)
+				_, _ = w.Write([]byte(`{"ok":true}`))
+			}))
+			defer server.Close()
+
+			auth := &cliproxyauth.Auth{
+				ID: "codearts-mode",
+				Attributes: map[string]string{
+					"api_key":        "AK_M",
+					"secret_key":     "SK_M",
+					"security_token": "ST_M",
+				},
+			}
+			client := NewCodeArtsHTTPClient(context.Background(), nil, auth, 0)
+			req, errReq := http.NewRequest(http.MethodPost, server.URL+"/api/v2/chat/completions", bytes.NewReader([]byte(tc.body)))
+			if errReq != nil {
+				t.Fatalf("new request: %v", errReq)
+			}
+			req.Header.Set("Content-Type", "application/json")
+
+			resp, errDo := client.Do(req)
+			if errDo != nil {
+				t.Fatalf("do: %v", errDo)
+			}
+			if errClose := resp.Body.Close(); errClose != nil {
+				t.Errorf("close body: %v", errClose)
+			}
+
+			if sawMode != tc.wantMode {
+				t.Fatalf("%s header = %q, want %q", CodeArtsModeTypeHeader, sawMode, tc.wantMode)
+			}
+		})
+	}
+}

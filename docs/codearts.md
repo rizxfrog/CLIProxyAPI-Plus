@@ -337,8 +337,14 @@ const requestHeaders = {
 };
 ```
 
-> ⚠️ 仓库当前**只实现了 `maas_type`**，没有读 `model_mode` 也没有发 `x-mode-type`。
-> 对于被标记为快速通道的模型，上行会缺少该头（是否影响路由未实测，见 §6.1.4）。
+> ✅ **已实现（本次）**：`model_mode` 在 `detail` 解析时透传，等于 `"fastmode"` 的模型
+> 由 `codeartsauth.RegisterFastModel` 登记，签名 RoundTripper 在出站前按请求体里的
+> 模型 id 补 `x-mode-type: fastmode`。`maas_type` 也一并改为**目录驱动**：
+> 原先写死的 `freeBenefitModelIDs` 只作为种子，目录发现的新福利模型会调用
+> `RegisterBenefitRoute` 自动登记，否则新模型会因缺头被 `002002009.404` 拒绝。
+>
+> ⚠️ 未实测：`x-mode-type` 对路由的实际影响无法在无有效凭据时验证；该头按客户端
+> 行为复刻，若上游忽略它也不会改变结果。
 
 
 ### 6.2 模型参数字段（逆向自渲染层 `flattenBuiltinModels`）
@@ -674,6 +680,7 @@ const signedHeaders = sign({
 - `internal/auth/codearts/dpop.go` — ES256 DPoP proof
 - `internal/auth/codearts/codearts.go` — OAuth exchange / refresh / caller-identity
 - `internal/auth/codearts/models.go` / `checkin.go` / `token.go` — 模型目录 / 签到 / 凭证落盘
+- `sdk/cliproxy/codearts_models.go` — 目录探针：拉取、映射、发布、退避刷新
 - `internal/runtime/executor/codearts_executor.go` — 执行器
 - `internal/runtime/executor/helps/codearts_http.go` — 签名 RoundTripper
 - `internal/registry/model_definitions.go`（`codearts` 分节位于 `models/models.json`）— 内置模型
@@ -699,11 +706,12 @@ const signedHeaders = sign({
    静态兜底见 `internal/registry/models/models.json` 的 `codearts` 分节。
    过滤规则必须照抄（`model_type !== "third"` + `GLM-5.1/Qwen3-VL-235B/maas-glm-4.7`
    黑名单），见 §6.1.2。
-   > ⚠️ **现状**：`internal/auth/codearts/models.go` 里的 `FetchModels` /
-   > `FetchAgentModels` / `FetchBuiltinModels` / `FetchFreeBenefitModels`
-   > **没有任何生产调用方**——`sdk/cliproxy/service_models.go` 走的是静态
-   > `registry.GetCodeArtsModels()`。这组函数目前只是带单测的死代码，
-   > 接线上线前需要补 `third` 过滤与 `x-mode-type`（§6.1.3）。
+   > ✅ **已接线（本次）**：`sdk/cliproxy/codearts_models.go` 把上述目录接入了
+   > 运行时。注册时静态 `registry.GetCodeArtsModels()` 仍先发布（作为兜底），
+   > 随后后台探针拉取真实目录并**覆盖**发布；失败或为空则保留兜底并退避重试。
+   > 显式配置了 `codearts-api-key[].models` 的凭据不参与探针（`models` 优先）。
+   > 刷新周期 = `registry.ModelsRefreshInterval`（3h），失败退避 10min。
+
 
 6. **额度**：读 `{snapEngineUrl}/snap-manager/v1/statistics/plugin`（§7.2.2），
    **不要**读 opengw 的 `user/tokens/balance`（整族已下线）。用 `credits_known`

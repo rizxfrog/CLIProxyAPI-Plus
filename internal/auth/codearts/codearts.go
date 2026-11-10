@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
@@ -103,19 +104,110 @@ const (
 
 // freeBenefitModelIDs are the limited-time free models (限时福利) served by the
 // developer gateway. They are listed dynamically by /api/v1/gateway/config, and
-// the fixed set below is used only to recognise them for request routing: these
-// ids are rejected with InferHub.002002009.404 unless the request carries the
-// maas_type=benefit header, so the id must be classifiable on the wire.
-var freeBenefitModelIDs = map[string]struct{}{
-	"deepseek-v4-flash-0731": {},
-	"deepseek-v4-pro-0813":   {},
-	"glm-5.3-flash":          {},
+// the fixed set below only seeds the routing table so a request is classified
+// correctly before the first catalogue fetch completes: these ids are rejected
+// with InferHub.002002009.404 unless the request carries the maas_type header,
+// so the id must be classifiable on the wire.
+//
+// The catalogue adds to this table at runtime (see RegisterBenefitRoute), which
+// is what keeps a newly published benefit model routable without a code change.
+var freeBenefitModelIDs = map[string]string{
+	"deepseek-v4-flash-0731": BenefitChannelBenefit,
+	"deepseek-v4-pro-0813":   BenefitChannelBenefit,
+	"glm-5.3-flash":          BenefitChannelBenefit,
 }
 
-// IsFreeBenefitModel reports whether the model id is served from the
-// limited-time free pool and therefore needs benefit routing.
+// BenefitChannelBenefit is the maas_type value that selects the limited-time
+// free pool.
+const BenefitChannelBenefit = "benefit"
+
+// BenefitChannelEducation is the maas_type value for the education entitlement
+// pool. The desktop client treats both channels the same way and only varies
+// the header value.
+const BenefitChannelEducation = "education"
+
+// FastModelMode is the model_mode value that marks a fast model. The desktop
+// client mirrors it into the x-mode-type request header.
+const FastModelMode = "fastmode"
+
+var (
+	benefitRouteMu sync.RWMutex
+	// benefitRoute maps a model id to its maas_type value. It starts as a copy
+	// of freeBenefitModelIDs and grows as catalogues are fetched.
+	benefitRoute = func() map[string]string {
+		route := make(map[string]string, len(freeBenefitModelIDs))
+		for id, channel := range freeBenefitModelIDs {
+			route[id] = channel
+		}
+		return route
+	}()
+	// fastModelRoute records which models run on the fast channel. It is keyed
+	// by model id for the same reason as the benefit table: the decision has to
+	// be made on the wire, from the request body, without a catalogue lookup.
+	fastModelRoute = make(map[string]struct{})
+)
+
+// RegisterBenefitRoute records that a model is served from an entitlement
+// channel, so requests for it carry the right maas_type header.
+//
+// It exists because the pool is discovered at runtime: a benefit model added by
+// the vendor after this binary shipped would otherwise be routed as a normal
+// model and rejected with InferHub.002002009.404.
+func RegisterBenefitRoute(modelID, channel string) {
+	id := strings.ToLower(strings.TrimSpace(modelID))
+	channel = strings.TrimSpace(channel)
+	if id == "" || channel == "" {
+		return
+	}
+	benefitRouteMu.Lock()
+	benefitRoute[id] = channel
+	benefitRouteMu.Unlock()
+}
+
+// BenefitRouteFor returns the maas_type value a model must be requested with.
+// The second result reports whether the model needs entitlement routing at all.
+func BenefitRouteFor(modelID string) (string, bool) {
+	id := strings.ToLower(strings.TrimSpace(modelID))
+	if id == "" {
+		return "", false
+	}
+	benefitRouteMu.RLock()
+	channel, ok := benefitRoute[id]
+	benefitRouteMu.RUnlock()
+	return channel, ok
+}
+
+// IsFreeBenefitModel reports whether the model id is served from the limited-time
+// free pool and therefore needs benefit routing.
+//
+// The education pool is reported separately: it is a different entitlement, so
+// folding it in here would tell callers the free pool serves a model it does not.
 func IsFreeBenefitModel(modelID string) bool {
-	_, ok := freeBenefitModelIDs[strings.ToLower(strings.TrimSpace(modelID))]
+	channel, ok := BenefitRouteFor(modelID)
+	return ok && channel == BenefitChannelBenefit
+}
+
+// RegisterFastModel records that a model runs on the fast channel, so requests
+// for it carry the x-mode-type header.
+func RegisterFastModel(modelID string) {
+	id := strings.ToLower(strings.TrimSpace(modelID))
+	if id == "" {
+		return
+	}
+	benefitRouteMu.Lock()
+	fastModelRoute[id] = struct{}{}
+	benefitRouteMu.Unlock()
+}
+
+// IsFastModel reports whether the model runs on the fast channel.
+func IsFastModel(modelID string) bool {
+	id := strings.ToLower(strings.TrimSpace(modelID))
+	if id == "" {
+		return false
+	}
+	benefitRouteMu.RLock()
+	_, ok := fastModelRoute[id]
+	benefitRouteMu.RUnlock()
 	return ok
 }
 
@@ -163,6 +255,40 @@ func NewClient(cfg *config.Config) *Client {
 
 // NewClientWithProxyURL creates a client with an optional per-auth proxy override.
 func NewClientWithProxyURL(cfg *config.Config, proxyURL string) *Client {
+	client := newClientWithProxyURL(cfg, proxyURL)
+	return client
+}
+
+// WithSnapHost overrides the snap engine origin the catalogue is read from.
+//
+// It exists so a credential can point at a compatible deployment (or a test
+// server) without changing the package-level default, which is compiled in from
+// the vendor's product.json.
+func (c *Client) WithSnapHost(host string) *Client {
+	if c == nil {
+		return nil
+	}
+	if trimmed := strings.TrimRight(strings.TrimSpace(host), "/"); trimmed != "" {
+		c.snapHost = trimmed
+	}
+	return c
+}
+
+// WithBenefitURL overrides the developer-gateway origin the benefit pool is read
+// from, so a deployment pinned to a regional gateway (or a test server) does not
+// have to rewrite the compiled-in default.
+func (c *Client) WithBenefitURL(url string) *Client {
+	if c == nil {
+		return nil
+	}
+	if trimmed := strings.TrimRight(strings.TrimSpace(url), "/"); trimmed != "" {
+		c.benefitURL = trimmed
+	}
+	return c
+}
+
+// newClientWithProxyURL builds the client; hosts stay overridable.
+func newClientWithProxyURL(cfg *config.Config, proxyURL string) *Client {
 	httpClient := &http.Client{Timeout: DefaultHTTPTimeout}
 	var sdkCfg config.SDKConfig
 	if cfg != nil {

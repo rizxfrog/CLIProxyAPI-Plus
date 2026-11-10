@@ -491,6 +491,11 @@ func (s *Service) registerModelsForAuthWithConfigAndCache(ctx context.Context, c
 		if strings.EqualFold(strings.TrimSpace(a.Provider), constant.Loomy) {
 			s.asyncProbeLoomyCatalogue(ctx, a, key)
 		}
+		if strings.EqualFold(strings.TrimSpace(a.Provider), constant.CodeArts) {
+			// The account's CodeAgent owns the real model list; the static
+			// catalogue is only a fallback, so refresh it in the background.
+			s.asyncProbeCodeArtsCatalogue(ctx, a, key)
+		}
 		return published
 	}
 
@@ -506,6 +511,9 @@ func (s *Service) registerModelsForAuthWithConfigAndCache(ctx context.Context, c
 	}
 	if provider == constant.Loomy {
 		s.asyncProbeLoomyCatalogue(ctx, a, key)
+	}
+	if provider == constant.CodeArts {
+		s.asyncProbeCodeArtsCatalogue(ctx, a, key)
 	}
 	return published
 }

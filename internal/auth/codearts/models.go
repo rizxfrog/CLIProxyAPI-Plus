@@ -50,8 +50,17 @@ type Model struct {
 	EnableQueue bool `json:"enable_queue,omitempty"`
 	// DisplayEnabled reports whether the catalog entry should be surfaced.
 	DisplayEnabled *bool `json:"display_enabled,omitempty"`
+	// ModelMode is the upstream model_mode. The value "fastmode" marks a fast
+	// model, which the desktop client mirrors into the `x-mode-type` request
+	// header. It lives at the model's top level, not inside model_parameters,
+	// so expanding the parameter block drops it unless carried explicitly.
+	ModelMode string `json:"model_mode,omitempty"`
 	// IsFreeBenefit marks the limited-time free models from gateway/config.
 	IsFreeBenefit bool `json:"is_free_benefit,omitempty"`
+	// BenefitChannel is the maas_type value the model must be requested with.
+	// It is "benefit" for the free pool and "education" for the education
+	// entitlement; empty means the model needs no entitlement routing.
+	BenefitChannel string `json:"maas_type,omitempty"`
 	// BaseURL overrides the LLM gateway for free-benefit models.
 	BaseURL string `json:"base_url,omitempty"`
 }
@@ -165,6 +174,7 @@ func (c *Client) FetchAgentModels(ctx context.Context, creds Credentials, langua
 				UsageTokenNum   int             `json:"usage_token_num"`
 				ModelQuotaNum   int             `json:"model_quota_num"`
 				ThinkLevel      string          `json:"think_level"`
+				ModelMode       string          `json:"model_mode"`
 				ModelParameters struct {
 					ModelID             string `json:"model_id"`
 					ContextWindow       int    `json:"context_window"`
@@ -195,10 +205,17 @@ func (c *Client) FetchAgentModels(ctx context.Context, creds Credentials, langua
 			SupportsImages:      entry.ModelParameters.SupportsImages,
 			ThinkLevel:          strings.TrimSpace(entry.ThinkLevel),
 			ModelType:           strings.TrimSpace(entry.ModelType),
+			ModelMode:           strings.TrimSpace(entry.ModelMode),
 		}
 		normalized, ok := normalizeModel(model)
 		if !ok {
 			continue
+		}
+		// model_mode selects the fast channel for this model. Record it while the
+		// catalogue is in hand: the routing decision is made later from the
+		// request body alone, with no catalogue available.
+		if fastID := normalized.ID; strings.EqualFold(normalized.ModelMode, FastModelMode) {
+			RegisterFastModel(fastID)
 		}
 		if _, exists := seen[normalized.ID]; exists {
 			continue
@@ -251,6 +268,10 @@ func (c *Client) FetchFreeBenefitModels(ctx context.Context, creds Credentials) 
 			continue
 		}
 		name := firstNonEmpty(entry.ModelName, entry.ModelID)
+		// The gateway lists the pool but not the label a request must carry, so
+		// record the route now: without this a benefit model published after this
+		// binary shipped would be requested as a normal model and rejected.
+		RegisterBenefitRoute(id, BenefitChannelBenefit)
 		out = append(out, &Model{
 			ID:                  id,
 			Name:                name,
@@ -261,6 +282,7 @@ func (c *Client) FetchFreeBenefitModels(ctx context.Context, creds Credentials) 
 			MaxTokens:           entry.MaxTokens,
 			TruncateLength:      entry.TruncateLength,
 			IsFreeBenefit:       true,
+			BenefitChannel:      BenefitChannelBenefit,
 			BaseURL:             baseURL,
 		})
 	}
@@ -294,6 +316,22 @@ func (c *Client) FetchModels(ctx context.Context, creds Credentials, language st
 	return models, nil
 }
 
+// excludedModelNames mirrors the desktop client's name blacklist. These entries
+// exist upstream but must not be offered as selectable models: the client keeps
+// them out of the model picker on purpose, so surfacing them here would offer
+// something the vendor UI never lets a user choose.
+var excludedModelNames = map[string]struct{}{
+	"glm-5.1":       {},
+	"qwen3-vl-235b": {},
+	"maas-glm-4.7":  {},
+}
+
+// isThirdPartyModelType reports whether the entry is a third-party hosted model.
+// The desktop client drops these before the catalogue ever reaches the kernel.
+func isThirdPartyModelType(modelType string) bool {
+	return strings.EqualFold(strings.TrimSpace(modelType), "third")
+}
+
 // normalizeModel fills defaults and rejects unusable entries.
 func normalizeModel(model *Model) (*Model, bool) {
 	if model == nil {
@@ -306,6 +344,15 @@ func normalizeModel(model *Model) (*Model, bool) {
 	model.ID = id
 	if strings.TrimSpace(model.Name) == "" {
 		model.Name = id
+	}
+	// Two filters the desktop client applies before publishing a catalogue:
+	// third-party hosted models are never routed through the kernel, and a small
+	// name blacklist is hidden from the model picker.
+	if isThirdPartyModelType(model.ModelType) {
+		return nil, false
+	}
+	if _, excluded := excludedModelNames[strings.ToLower(strings.TrimSpace(model.Name))]; excluded {
+		return nil, false
 	}
 	if strings.TrimSpace(model.Provider) == "" {
 		model.Provider = "inferhub-provider"

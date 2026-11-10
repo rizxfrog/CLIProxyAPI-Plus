@@ -31,6 +31,10 @@ const CodeArtsBenefitHeader = "maas_type"
 // CodeArtsBenefitHeaderValue is the value that selects the benefit pool.
 const CodeArtsBenefitHeaderValue = "benefit"
 
+// CodeArtsModeTypeHeader selects the fast channel for models whose catalogue
+// entry carries model_mode == "fastmode".
+const CodeArtsModeTypeHeader = "x-mode-type"
+
 // codeArtsSigningRoundTripper signs every outbound CodeArts request with Huawei
 // Cloud SDK-HMAC-SHA256.
 //
@@ -75,9 +79,22 @@ func (t *codeArtsSigningRoundTripper) RoundTrip(req *http.Request) (*http.Respon
 	// Limited-time free models live behind a dedicated routing header. The
 	// model id is read from the body here so the executor does not need a
 	// second translation pass.
-	if modelID := gjson.GetBytes(body, "model").String(); modelID != "" &&
-		codeartsauth.IsFreeBenefitModel(modelID) {
-		req.Header.Set(CodeArtsBenefitHeader, CodeArtsBenefitHeaderValue)
+	//
+	// The table is consulted rather than a fixed list because the pool is
+	// discovered at runtime: a benefit model the vendor publishes after this
+	// binary shipped is registered by the catalogue fetch, and a request for it
+	// must still carry the header or the gateway answers 002002009.404.
+	if modelID := gjson.GetBytes(body, "model").String(); modelID != "" {
+		if channel, ok := codeartsauth.BenefitRouteFor(modelID); ok {
+			req.Header.Set(CodeArtsBenefitHeader, channel)
+		}
+		// Fast models take a separate channel. The desktop client sends this
+		// alongside maas_type; it comes from the catalogue's model_mode field,
+		// which is recorded at fetch time because the decision here is made from
+		// the request body alone.
+		if codeartsauth.IsFastModel(modelID) {
+			req.Header.Set(CodeArtsModeTypeHeader, codeartsauth.FastModelMode)
+		}
 	}
 
 	// The Huawei Cloud signature replaces the bearer credential the

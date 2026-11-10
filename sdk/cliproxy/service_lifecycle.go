@@ -247,6 +247,7 @@ func (s *Service) Run(ctx context.Context) error {
 		go s.runFloatboatModelRefresh(ctx)
 		go s.runLobsteraiServerModelRefresh(ctx)
 		go s.runLoomyModelRefresh(ctx)
+		go s.runCodeArtsModelRefresh(ctx)
 	}
 
 	select {

@@ -211,6 +211,8 @@ func TestFetchBuiltinModelsParsesCatalog(t *testing.T) {
 		_, _ = w.Write([]byte(`{"builtinModels":[
 			{"model_id":"GLM-5.2","model_name":"GLM-5.2","context_window":202752,"input_context_window":196608,"output_context_window":131072,"model_category":"文本","supports_images":false},
 			{"model_id":"Qwen3-VL-235B","model_name":"Qwen3-VL-235B","model_category":"图片理解","supports_images":true},
+			{"model_id":"vision-1","model_name":"Vision-1","model_category":"图片理解","supports_images":true},
+			{"model_id":"third-1","model_name":"Third One","model_type":"third"},
 			{"model_id":"","model_name":""}
 		]}`))
 	}))
@@ -220,6 +222,8 @@ func TestFetchBuiltinModelsParsesCatalog(t *testing.T) {
 	if errModels != nil {
 		t.Fatalf("fetch models: %v", errModels)
 	}
+	// The name blacklist drops Qwen3-VL-235B and the third-party type is
+	// filtered, leaving the text model, the vision model, and nothing else.
 	if len(models) != 2 {
 		t.Fatalf("model count = %d, want 2", len(models))
 	}
@@ -234,6 +238,11 @@ func TestFetchBuiltinModelsParsesCatalog(t *testing.T) {
 	}
 	if !models[1].SupportsImages {
 		t.Fatal("multimodal flag was not preserved")
+	}
+	for _, model := range models {
+		if model.ID == "Qwen3-VL-235B" || model.ID == "third-1" {
+			t.Fatalf("%s should have been filtered out", model.ID)
+		}
 	}
 }
 
@@ -816,5 +825,99 @@ func TestFetchTokenBalanceFallsBackToTheGateway(t *testing.T) {
 	}
 	if balance.CreditsKnown {
 		t.Error("the gateway path does not prove the ledger was read")
+	}
+}
+
+// TestBenefitRouteLearnedFromCatalogue pins that a benefit model the catalogue
+// discovers is routable without a code change.
+//
+// The fixed seed list only covers models known at build time. A pool model
+// published later would otherwise be requested without maas_type and rejected
+// with InferHub.002002009.404, which reads like a broken model id rather than a
+// missing routing header.
+func TestBenefitRouteLearnedFromCatalogue(t *testing.T) {
+	const lateModel = "deepseek-v5-turbo-0101"
+	if _, known := BenefitRouteFor(lateModel); known {
+		t.Fatalf("%s is unexpectedly already routable", lateModel)
+	}
+
+	client, server := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"error_code":"0000","result":{
+			"base_url":"https://free.example.com/api/v2",
+			"models":[{"model_id":"` + lateModel + `","model_name":"` + lateModel + `"}]
+		}}`))
+	}))
+	defer server.Close()
+
+	if _, errFetch := client.FetchFreeBenefitModels(context.Background(), Credentials{AccessKey: "AK", SecretKey: "SK"}); errFetch != nil {
+		t.Fatalf("fetch free models: %v", errFetch)
+	}
+
+	channel, known := BenefitRouteFor(lateModel)
+	if !known {
+		t.Fatalf("%s was not registered by the catalogue fetch", lateModel)
+	}
+	if channel != BenefitChannelBenefit {
+		t.Fatalf("channel = %q, want %q", channel, BenefitChannelBenefit)
+	}
+	if !IsFreeBenefitModel(lateModel) {
+		t.Fatalf("%s should classify as a free-benefit model", lateModel)
+	}
+}
+
+// TestEducationChannelIsNotReportedAsFreePool pins that the two entitlements stay
+// distinct: a caller that asks "is this the free pool" must not be told yes for
+// an education model, because they are billed and gated differently.
+func TestEducationChannelIsNotReportedAsFreePool(t *testing.T) {
+	const educationModel = "edu-only-model"
+	RegisterBenefitRoute(educationModel, BenefitChannelEducation)
+
+	channel, known := BenefitRouteFor(educationModel)
+	if !known || channel != BenefitChannelEducation {
+		t.Fatalf("route = (%q, %v), want (%q, true)", channel, known, BenefitChannelEducation)
+	}
+	if IsFreeBenefitModel(educationModel) {
+		t.Fatal("an education model must not be reported as part of the free pool")
+	}
+}
+
+// TestFastModelRouteIsLearnedFromAgentDetail pins that model_mode is carried from
+// the agent detail top level.
+//
+// model_mode sits beside model_parameters, not inside it, so a naive expansion of
+// the parameter block drops it. Without it the fast-channel header is never sent.
+func TestFastModelRouteIsLearnedFromAgentDetail(t *testing.T) {
+	const fastID = "GLM-5.2-FAST"
+	if IsFastModel(fastID) {
+		t.Fatalf("%s is unexpectedly already a fast model", fastID)
+	}
+
+	client, server := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/agent-center/agents/useragents":
+			_, _ = w.Write([]byte(`{"agents":[{"agent_id":"code-agent-1","agent_name":"CodeAgent","alias":{"alias_zh_cn":"智能体"},"show_in_ide":true}]}`))
+		case "/v1/agent-center/agents/detail":
+			_, _ = w.Write([]byte(`{"gpts":{"models":[{
+				"model_name":"` + fastID + `","model_type":"builtin","model_mode":"fastmode",
+				"model_parameters":{"model_id":"` + fastID + `","context_window":202752}
+			},{
+				"model_name":"GLM-5.2","model_type":"builtin",
+				"model_parameters":{"model_id":"GLM-5.2","context_window":202752}
+			}]}}`))
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	if _, errModels := client.FetchAgentModels(context.Background(), Credentials{AccessKey: "AK", SecretKey: "SK"}, "zh-cn"); errModels != nil {
+		t.Fatalf("fetch agent models: %v", errModels)
+	}
+
+	if !IsFastModel(fastID) {
+		t.Fatalf("%s should be registered as a fast model", fastID)
+	}
+	if IsFastModel("GLM-5.2") {
+		t.Fatal("a model without model_mode must not be registered as fast")
 	}
 }
