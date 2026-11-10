@@ -921,3 +921,39 @@ func TestFastModelRouteIsLearnedFromAgentDetail(t *testing.T) {
 		t.Fatal("a model without model_mode must not be registered as fast")
 	}
 }
+
+// TestTerminalRefreshErrors pins that a spent STS refresh token is classified as
+// terminal rather than retryable.
+//
+// Huawei Cloud rotates the refresh token on every exchange, so a replay answers
+// STS5.1806 "the refresh token has been used". The shared refresh loop retries
+// non-terminal errors indefinitely, which would leave the account reporting a
+// retryable failure forever instead of asking for a fresh sign-in.
+func TestTerminalRefreshErrors(t *testing.T) {
+	cases := []struct {
+		code     string
+		terminal bool
+	}{
+		{ErrCodeRefreshTokenUsed, true},
+		{ErrCodeRefreshTokenInvalid, true},
+		{ErrCodeRefreshTokenExpired, true},
+		// A shape or transport complaint is not terminal: the same credential
+		// may refresh successfully once the cause is fixed.
+		{ErrCodeNoChannelGroup, false},
+		{"STS5.1804", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		err := &Error{StatusCode: http.StatusBadRequest, Code: tc.code, Message: "upstream said no"}
+		if got := err.IsTerminalRefreshError(); got != tc.terminal {
+			t.Errorf("IsTerminalRefreshError(%q) = %v, want %v", tc.code, got, tc.terminal)
+		}
+	}
+	if (&Error{}).IsTerminalRefreshError() {
+		t.Error("an empty error must not be terminal")
+	}
+	var nilErr *Error
+	if nilErr.IsTerminalRefreshError() {
+		t.Error("a nil error must not be terminal")
+	}
+}

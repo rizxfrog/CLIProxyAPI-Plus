@@ -2368,6 +2368,14 @@ func isTerminalRefreshError(auth *Auth, err error) bool {
 	if err == nil {
 		return false
 	}
+	// A provider that knows its own refresh vocabulary declares terminality
+	// directly. This is how a vendor error (Huawei Cloud STS answers
+	// "STS5.1806 the refresh token has been used") is recognised without adding
+	// its wording to the shared token list below.
+	var terminal interface{ IsTerminalRefreshError() bool }
+	if errors.As(err, &terminal) && terminal != nil && terminal.IsTerminalRefreshError() {
+		return true
+	}
 	var partErr interface {
 		OuterRefreshError() error
 		SIWCRefreshError() error

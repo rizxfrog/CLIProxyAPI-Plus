@@ -80,6 +80,17 @@ const (
 	// every endpoint when the caller resolves to no benefit channel group. It
 	// arrives with HTTP 200, so it must be matched on the code, not the status.
 	ErrCodeNoChannelGroup = "4000"
+	// ErrCodeRefreshTokenUsed is the STS rejection for a refresh token that was
+	// already exchanged. Huawei Cloud rotates the token on every use, so a token
+	// replayed after a crash or a parallel refresh is permanently spent; retrying
+	// can never succeed and the account must sign in again.
+	ErrCodeRefreshTokenUsed = "STS5.1806"
+	// ErrCodeRefreshTokenInvalid is the STS rejection for a malformed or unknown
+	// refresh token. It is terminal for the same reason: no retry can mint a
+	// usable token from a value the server does not recognise.
+	ErrCodeRefreshTokenInvalid = "STS5.1805"
+	// ErrCodeRefreshTokenExpired is the STS rejection for an expired refresh token.
+	ErrCodeRefreshTokenExpired = "STS5.1802"
 	// PluginStatisticsPath is the credit/usage ledger the desktop client's
 	// account menu renders. It replaced the developer-gateway balance read:
 	// the 0.2.8 client no longer calls /api/v1/user/tokens/balance at all.
@@ -731,6 +742,24 @@ func (e *Error) Error() string {
 		return fmt.Sprintf("codearts: HTTP %d code %s: %s", e.StatusCode, e.Code, e.Message)
 	}
 	return fmt.Sprintf("codearts: HTTP %d: %s", e.StatusCode, e.Message)
+}
+
+// IsTerminalRefreshError reports that no retry can repair this refresh failure.
+//
+// The shared refresh loop retries non-terminal errors indefinitely, which is
+// right for a transient network fault and wrong for a spent refresh token: the
+// account stays wedged reporting a retryable failure forever instead of asking
+// the operator to sign in again. Declaring it here keeps the vendor's error
+// vocabulary inside the vendor package instead of growing a global string list.
+func (e *Error) IsTerminalRefreshError() bool {
+	if e == nil {
+		return false
+	}
+	switch e.Code {
+	case ErrCodeRefreshTokenUsed, ErrCodeRefreshTokenInvalid, ErrCodeRefreshTokenExpired:
+		return true
+	}
+	return false
 }
 
 // signedRequest builds a request whose headers carry a Huawei Cloud signature.
