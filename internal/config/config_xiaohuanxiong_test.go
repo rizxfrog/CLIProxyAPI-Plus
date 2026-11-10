@@ -16,7 +16,7 @@ func TestXiaohuanxiongKeyAcceptsRefreshToken(t *testing.T) {
 	path := filepath.Join(dir, "config.yaml")
 	content := `
 port: 8317
-auth-dir: "` + dir + `/auths"
+auth-dir: '` + dir + `/auths'
 xiaohuanxiong-api-key:
   - api-key: "access-token-value"
     refresh-token: "refresh-token-value"
