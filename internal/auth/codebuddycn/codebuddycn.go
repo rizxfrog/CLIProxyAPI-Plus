@@ -74,6 +74,9 @@ type Client struct {
 	// authentication domain (copilot.tencent.com for CN, www.codebuddy.ai for
 	// the international gateway).
 	domain string
+	// catalogOriginOverride pins the origin the catalogue is read from, set from
+	// the credential's base_url host or a regional deployment.
+	catalogOriginOverride string
 }
 
 // NewClient creates a proxy-aware CodeBuddy OAuth client.

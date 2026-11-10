@@ -248,6 +248,7 @@ func (s *Service) Run(ctx context.Context) error {
 		go s.runLobsteraiServerModelRefresh(ctx)
 		go s.runLoomyModelRefresh(ctx)
 		go s.runCodeArtsModelRefresh(ctx)
+		go s.runCodeBuddyModelRefresh(ctx)
 	}
 
 	select {

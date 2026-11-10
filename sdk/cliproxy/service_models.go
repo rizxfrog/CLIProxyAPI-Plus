@@ -496,6 +496,12 @@ func (s *Service) registerModelsForAuthWithConfigAndCache(ctx context.Context, c
 			// catalogue is only a fallback, so refresh it in the background.
 			s.asyncProbeCodeArtsCatalogue(ctx, a, key)
 		}
+		if strings.EqualFold(strings.TrimSpace(a.Provider), constant.CodeBuddyCN) ||
+			strings.EqualFold(strings.TrimSpace(a.Provider), constant.CodeBuddyAI) {
+			// The gateway's /v3/config owns the real catalogue for both editions;
+			// the static list is only a fallback.
+			s.asyncProbeCodeBuddyCatalogue(ctx, a, key)
+		}
 		return published
 	}
 
@@ -514,6 +520,9 @@ func (s *Service) registerModelsForAuthWithConfigAndCache(ctx context.Context, c
 	}
 	if provider == constant.CodeArts {
 		s.asyncProbeCodeArtsCatalogue(ctx, a, key)
+	}
+	if provider == constant.CodeBuddyCN || provider == constant.CodeBuddyAI {
+		s.asyncProbeCodeBuddyCatalogue(ctx, a, key)
 	}
 	return published
 }
