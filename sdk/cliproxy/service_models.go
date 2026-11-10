@@ -502,6 +502,11 @@ func (s *Service) registerModelsForAuthWithConfigAndCache(ctx context.Context, c
 			// the static list is only a fallback.
 			s.asyncProbeCodeBuddyCatalogue(ctx, a, key)
 		}
+		if strings.EqualFold(strings.TrimSpace(a.Provider), constant.Xiaohuanxiong) {
+			// The gateway's /model_catalog owns the real per-account list; the
+			// static catalogue is only a fallback.
+			s.asyncProbeXiaohuanxiongCatalogue(ctx, a, key)
+		}
 		return published
 	}
 
@@ -523,6 +528,9 @@ func (s *Service) registerModelsForAuthWithConfigAndCache(ctx context.Context, c
 	}
 	if provider == constant.CodeBuddyCN || provider == constant.CodeBuddyAI {
 		s.asyncProbeCodeBuddyCatalogue(ctx, a, key)
+	}
+	if provider == constant.Xiaohuanxiong {
+		s.asyncProbeXiaohuanxiongCatalogue(ctx, a, key)
 	}
 	return published
 }
