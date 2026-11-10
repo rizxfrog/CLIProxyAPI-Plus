@@ -102,3 +102,5 @@ __pycache__/
 .run/
 /skills
 /skills-lock.json
+
+/reversewk
