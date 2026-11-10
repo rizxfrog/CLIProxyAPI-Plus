@@ -614,18 +614,120 @@ func (c *Client) FetchTokenBalance(ctx context.Context, accessKey, secretKey, se
 	if errGateway == nil {
 		return gateway, nil
 	}
-	// A switched-off benefit program explains the gateway failure, so that
-	// message is more useful than the primary read's error. A gateway business
-	// code is likewise a real answer from a live service, so prefer it over a
-	// transport-level failure such as "route not published in this region".
-	if IsBenefitGatewayDisabled(errGateway) {
-		return nil, errGateway
+	// Both reads failed. The statistics ledger is the authoritative surface, so
+	// its error is what the operator needs to see: answering with the gateway's
+	// "benefit program disabled" says nothing about why the ledger read failed
+	// and sends the operator looking at the wrong subsystem. The gateway outcome
+	// is attached as context instead of replacing the cause.
+	return nil, &BalanceReadError{
+		Primary:    errStatistics,
+		Fallback:   errGateway,
+		PrimaryAPI: pluginStatisticsPathName,
+		FallbackOK: !IsBenefitGatewayDisabled(errGateway),
 	}
-	var gatewayAPIErr *Error
-	if errors.As(errGateway, &gatewayAPIErr) && gatewayAPIErr.Code != "" {
-		return nil, errGateway
+}
+
+// BalanceReadError reports that every credit surface failed.
+//
+// It keeps the primary (statistics ledger) error as the cause and carries the
+// fallback outcome alongside it, so the message names the surface that actually
+// broke instead of the last one that was tried.
+type BalanceReadError struct {
+	// Primary is the statistics ledger failure.
+	Primary error
+	// Fallback is the developer gateway failure.
+	Fallback error
+	// PrimaryAPI names the endpoint the primary read used.
+	PrimaryAPI string
+	// FallbackOK reports whether the gateway answered at all. When false the
+	// gateway's benefit program is switched off, which is expected and is not
+	// the reason the ledger read failed.
+	FallbackOK bool
+}
+
+// pluginStatisticsPathName is the endpoint label used in diagnostics.
+const pluginStatisticsPathName = "GET " + PluginStatisticsPath
+
+func (e *BalanceReadError) Error() string {
+	if e == nil {
+		return "codearts: credit balance is unavailable"
 	}
-	return nil, errStatistics
+	primary := "unknown error"
+	if e.Primary != nil {
+		primary = e.Primary.Error()
+	}
+	message := fmt.Sprintf("codearts: %s failed: %s", e.PrimaryAPI, primary)
+	if e.Fallback != nil {
+		// Keep the fallback outcome visible without letting it displace the
+		// cause: a switched-off benefit program is a real state, but it does not
+		// explain why the authoritative ledger read broke.
+		message += " (developer gateway: " + e.Fallback.Error() + ")"
+	}
+	return message
+}
+
+// Unwrap exposes the primary failure to errors.Is/errors.As.
+func (e *BalanceReadError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Primary
+}
+
+// Is exposes the fallback failure to errors.Is/errors.As so a caller can still
+// ask what the developer gateway said.
+//
+// It deliberately does not *cause* the error: the ledger is authoritative, and
+// a switched-off gateway is the expected state for most accounts. Callers that
+// need the gateway's verdict ask for it, rather than having it displace the
+// real cause.
+func (e *BalanceReadError) Is(target error) bool {
+	if e == nil || target == nil || e.Fallback == nil {
+		return false
+	}
+	return errors.Is(e.Fallback, target)
+}
+
+// As routes a concrete-type query to the surface whose answer is strongest.
+//
+// A 404 from the ledger means the endpoint is not published in this
+// deployment, so it carries no information about the account; the gateway's
+// verdict is then the better answer. Every other ledger outcome is a real
+// statement about this account (401/403: rejected, 5xx: broken, 200 with a
+// code: service-level refusal) and must win, because a gateway envelope code
+// arrives on an HTTP 200 and describes a different surface entirely.
+//
+// errors.As calls this method before unwrapping, so this order decides the
+// status mapping the caller applies.
+func (e *BalanceReadError) As(target any) bool {
+	if e == nil || target == nil {
+		return false
+	}
+	unpublished := false
+	var primaryErr *Error
+	if errors.As(e.Primary, &primaryErr) && primaryErr != nil && primaryErr.StatusCode == http.StatusNotFound && primaryErr.Code == "" {
+		unpublished = true
+	}
+	if !unpublished && e.Primary != nil && errors.As(e.Primary, target) {
+		return true
+	}
+	if e.Fallback != nil && errors.As(e.Fallback, target) {
+		return true
+	}
+	if e.Primary == nil {
+		return false
+	}
+	return errors.As(e.Primary, target)
+}
+
+// FallbackDisabled reports whether the developer gateway's benefit program is
+// switched off. Callers use it to explain a shortfall, not as the cause: the
+// primary read failing is what made the balance unavailable.
+func (e *BalanceReadError) FallbackDisabled() bool {
+	if e == nil {
+		return false
+	}
+	return !e.FallbackOK
 }
 
 // fetchDeveloperGatewayBalance queries the developer gateway for the account's

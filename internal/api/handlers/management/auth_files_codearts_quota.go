@@ -2,6 +2,7 @@ package management
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -59,18 +60,26 @@ func (h *Handler) GetCodeArtsQuota(c *gin.Context) {
 	client := newCodeArtsBalanceClient(h.cfg, auth.ProxyURL)
 	balance, errBalance := client.FetchTokenBalance(c.Request.Context(), creds.AccessKey, creds.SecretKey, creds.SecurityToken)
 	if errBalance != nil {
-		// The developer gateway is switched off upstream. This is not a
-		// credential defect and retrying cannot fix it, so answer 502 with an
-		// explanation instead of leaking the bare upstream envelope code.
-		if codeartsauth.IsBenefitGatewayDisabled(errBalance) {
-			c.JSON(http.StatusBadGateway, gin.H{"error": errBalance.Error(), "reason": "benefit_gateway_disabled"})
-			return
+		// Both credit surfaces failed. Report the failure that caused it (the
+		// statistics ledger) and carry the gateway state as context: labelling an
+		// unreadable ledger as "benefit_gateway_disabled" sends the operator to
+		// the wrong subsystem, because a switched-off gateway is the expected
+		// state for most accounts and never explains a ledger failure.
+		payload := gin.H{"error": errBalance.Error()}
+		var readErr *codeartsauth.BalanceReadError
+		if errors.As(errBalance, &readErr) {
+			if readErr.FallbackDisabled() {
+				payload["reason"] = "benefit_gateway_disabled"
+			} else {
+				payload["reason"] = "credit_ledger_unavailable"
+			}
 		}
 		status := http.StatusBadGateway
-		if apiErr, ok := errBalance.(*codeartsauth.Error); ok && apiErr.StatusCode >= 400 {
+		var apiErr *codeartsauth.Error
+		if errors.As(errBalance, &apiErr) && apiErr.StatusCode >= 400 {
 			status = apiErr.StatusCode
 		}
-		c.JSON(status, gin.H{"error": errBalance.Error()})
+		c.JSON(status, payload)
 		return
 	}
 

@@ -997,3 +997,84 @@ func TestRotationUnavailableIsTerminal(t *testing.T) {
 		}
 	}
 }
+
+// TestFetchTokenBalanceNamesTheLedgerWhenBothReadsFail pins that the message
+// reports the surface that broke, not the last one tried.
+//
+// Answering with the gateway's "benefit program disabled" says nothing about
+// why the authoritative ledger failed, and a switched-off gateway is the
+// expected state for most accounts, so it would send the operator to the wrong
+// subsystem.
+func TestFetchTokenBalanceNamesTheLedgerWhenBothReadsFail(t *testing.T) {
+	client, server := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case PluginStatisticsPath:
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"error_code":"5000","error_msg":"internal error"}`))
+		case BenefitGatewayConfigPath:
+			_, _ = w.Write([]byte(`{"enabled":false}`))
+		default:
+			_, _ = w.Write([]byte(`{"error_code":"4000","error_msg":"invalid channel, group not found","result":null}`))
+		}
+	}))
+	defer server.Close()
+
+	_, errBalance := client.FetchTokenBalance(context.Background(), "AK", "SK", "ST")
+	if errBalance == nil {
+		t.Fatal("expected an error")
+	}
+	message := errBalance.Error()
+	if !strings.Contains(message, PluginStatisticsPath) {
+		t.Fatalf("message does not name the failed ledger read: %q", message)
+	}
+	if !strings.Contains(message, "internal error") {
+		t.Fatalf("message does not carry the ledger's own reason: %q", message)
+	}
+	// The gateway state stays visible as context, but must not be the headline.
+	if strings.HasPrefix(message, "codearts: the developer gateway is off") {
+		t.Fatalf("gateway state displaced the real cause: %q", message)
+	}
+
+	var readErr *BalanceReadError
+	if !errors.As(errBalance, &readErr) {
+		t.Fatalf("error is not a BalanceReadError: %T", errBalance)
+	}
+	if !readErr.FallbackDisabled() {
+		t.Fatal("the gateway's switched-off state was not recorded")
+	}
+	// The gateway verdict stays queryable for callers that need it.
+	if !IsBenefitGatewayDisabled(errBalance) {
+		t.Fatal("the disabled-gateway verdict is no longer reachable")
+	}
+}
+
+// TestFetchTokenBalanceLedgerOnlyFailureStandalone pins that a ledger failure
+// with a working gateway still reports the ledger.
+func TestFetchTokenBalanceLedgerOnlyFailureStandalone(t *testing.T) {
+	client, server := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == PluginStatisticsPath {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"error_code":"APIG.0301","error_msg":"Incorrect IAM authentication information"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"error_code":"1001","error_msg":"quota not provisioned","result":null}`))
+	}))
+	defer server.Close()
+
+	_, errBalance := client.FetchTokenBalance(context.Background(), "AK", "SK", "ST")
+	if errBalance == nil {
+		t.Fatal("expected an error")
+	}
+	if !strings.Contains(errBalance.Error(), PluginStatisticsPath) {
+		t.Fatalf("message does not name the ledger: %q", errBalance.Error())
+	}
+	// The status mapping must follow the ledger's HTTP status, not the gateway's
+	// always-200 envelope.
+	var apiErr *Error
+	if !errors.As(errBalance, &apiErr) {
+		t.Fatalf("no typed upstream error: %T", errBalance)
+	}
+	if apiErr.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want the ledger's 403", apiErr.StatusCode)
+	}
+}
