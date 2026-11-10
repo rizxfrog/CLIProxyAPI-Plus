@@ -629,6 +629,30 @@ const signedHeaders = sign({
 > `is_credit_package: true` 但四个桶全为 0。这不是读取失败——因此实现里用
 > `credits_known` 把「读到了、就是 0」和「读不到」区分开。
 
+#### 7.2.3 ⚠️ 数值字段的 JSON 类型不稳定（2026-11-10 实测）
+
+同一个字段，**有无余额时类型不同**：
+
+| 场景 | 实际下发 | 严格 `int64` 解码 |
+|---|---|---|
+| 体验版，全 0 | `"package_credit_amount": 0` | ✅ |
+| 有积分（实测 100 分） | `"package_credit_amount": 100.0` | ❌ `cannot unmarshal number 100.0` |
+
+后果：**只有真正持有积分的账号才会报错**，全 0 的账号一直正常——所以这个缺陷
+在体验版账号上永远测不出来，只在付费账号上暴露，且表现为“整个额度读取失败”：
+
+```
+codearts: invalid plugin statistics response:
+json: cannot unmarshal number 100.0 into Go struct field
+pluginStatisticsResponse.metrics.2.package_credit_amount of type int64
+```
+
+另外已知会出现：数字字符串（`"100"`）与科学计数法（`1e7`）。
+
+**修法**：金额字段改用 `ledgerNumber`（`ledger_number.go`），接受整数 / 浮点 /
+数字字符串 / `null`，按整数截断；无法解析时**返回错误而不是静默记 0**，
+避免坏数据伪装成“没有积分”。
+
 `/snap-manager/v1/package/overview` 在 0.2.8 里仍有引用，但对真实账号 **404**
 （`APIG.0101 not published`），只在客户端读取 on-demand 指标时兜底尝试。
 

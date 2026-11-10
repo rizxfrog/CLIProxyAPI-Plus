@@ -142,3 +142,64 @@ func TestCodeArtsCredentialExpired(t *testing.T) {
 		t.Fatal("missing expiry should defer to the upstream, not force a refresh")
 	}
 }
+
+// TestGetCodeArtsQuotaReadsAFloatLedger drives the real upstream client against a
+// server that reports credit amounts as floats.
+//
+// This is the shape a funded account receives: the same metric arrived as an
+// integer while the package held no credits, and a strict int64 field rejected
+// the float with "cannot unmarshal number 100.0", failing the entire balance
+// read for every account that actually has credits.
+func TestGetCodeArtsQuotaReadsAFloatLedger(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != codeartsauth.PluginStatisticsPath {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{
+			"metrics":[
+				{"name":"usageTotalPackageCredit","package_credit_amount":5520.0,"package_credit_used":120.0,
+				 "package_credit_remain":5400.0,"package_credit_expiring_amount":5400.0},
+				{"name":"usageTokenChatMessages","usage_token_num":1000.0,"package_token_amount":10000000.0}
+			],
+			"package":{"spec_code":"codearts.agent.individual.basic","package_name_en":"Basic","is_credit_package":true}
+		}`))
+	}))
+	defer upstream.Close()
+
+	previous := newCodeArtsBalanceClient
+	newCodeArtsBalanceClient = func(cfg *config.Config, proxyURL string) codeArtsBalanceFetcher {
+		return codeartsauth.NewClientWithProxyURL(cfg, proxyURL).WithSnapHost(upstream.URL)
+	}
+	t.Cleanup(func() { newCodeArtsBalanceClient = previous })
+
+	manager, auth := registerCodeArtsAuth(t)
+	h := &Handler{authManager: manager}
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/v8/management/codearts-quota?auth_index="+auth.EnsureIndex(), nil)
+
+	h.GetCodeArtsQuota(ctx)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", recorder.Code, recorder.Body.String())
+	}
+	var body CodeArtsQuota
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body.TotalQuota != 5520 || body.TotalBalance != 5400 || body.UsedAmount != 120 {
+		t.Fatalf("credit figures lost: %+v", body)
+	}
+	if body.ExpiringAmount != 5400 {
+		t.Fatalf("expiring amount = %d, want 5400", body.ExpiringAmount)
+	}
+	if !body.CreditsKnown {
+		t.Fatal("credits_known not set for a successful ledger read")
+	}
+	if body.Package != "Basic" || body.SpecCode != "codearts.agent.individual.basic" {
+		t.Fatalf("package metadata lost: %+v", body)
+	}
+}

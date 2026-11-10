@@ -997,15 +997,20 @@ func (c *Client) benefitGatewayDisabled(ctx context.Context, creds Credentials, 
 }
 
 // pluginStatisticsMetric is one row of the plugin statistics ledger.
+//
+// The amount fields use ledgerNumber because the route does not keep a stable
+// JSON type for them: an account with credits receives floats (100.0) where a
+// credit-less account received integers (0), and a strict int64 field turns that
+// into a decode failure for the whole response.
 type pluginStatisticsMetric struct {
-	Name                  string `json:"name"`
-	Value                 int64  `json:"value"`
-	UsageTokenNum         int64  `json:"usage_token_num"`
-	PackageTokenAmount    int64  `json:"package_token_amount"`
-	PackageCreditAmount   int64  `json:"package_credit_amount"`
-	PackageCreditUsed     int64  `json:"package_credit_used"`
-	PackageCreditRemain   int64  `json:"package_credit_remain"`
-	PackageCreditExpiring int64  `json:"package_credit_expiring_amount"`
+	Name                  string       `json:"name"`
+	Value                 ledgerNumber `json:"value"`
+	UsageTokenNum         ledgerNumber `json:"usage_token_num"`
+	PackageTokenAmount    ledgerNumber `json:"package_token_amount"`
+	PackageCreditAmount   ledgerNumber `json:"package_credit_amount"`
+	PackageCreditUsed     ledgerNumber `json:"package_credit_used"`
+	PackageCreditRemain   ledgerNumber `json:"package_credit_remain"`
+	PackageCreditExpiring ledgerNumber `json:"package_credit_expiring_amount"`
 }
 
 // pluginStatisticsResponse mirrors GET /snap-manager/v1/statistics/plugin.
@@ -1073,13 +1078,13 @@ func (c *Client) fetchPluginStatistics(ctx context.Context, accessKey, secretKey
 	for _, metric := range parsed.Metrics {
 		switch metric.Name {
 		case StatisticsMetricTotalCredit:
-			balance.TotalQuota = metric.PackageCreditAmount
-			balance.UsedAmount = metric.PackageCreditUsed
-			balance.TotalBalance = metric.PackageCreditRemain
-			balance.ExpiringAmount = metric.PackageCreditExpiring
+			balance.TotalQuota = metric.PackageCreditAmount.Int64()
+			balance.UsedAmount = metric.PackageCreditUsed.Int64()
+			balance.TotalBalance = metric.PackageCreditRemain.Int64()
+			balance.ExpiringAmount = metric.PackageCreditExpiring.Int64()
 		case StatisticsMetricTokenUsage:
-			balance.DailyTokenLimit = metric.PackageTokenAmount
-			balance.DailyTokensUsed = metric.UsageTokenNum
+			balance.DailyTokenLimit = metric.PackageTokenAmount.Int64()
+			balance.DailyTokensUsed = metric.UsageTokenNum.Int64()
 		}
 	}
 	balance.CreditsKnown = true
