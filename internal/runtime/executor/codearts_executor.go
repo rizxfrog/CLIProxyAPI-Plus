@@ -154,7 +154,7 @@ func (e *CodeArtsExecutor) Refresh(ctx context.Context, auth *cliproxyauth.Auth)
 	}
 	keyPair := codeArtsDpopKeyPair(auth)
 	if keyPair == nil {
-		return nil, fmt.Errorf("codearts: cannot refresh credentials without the original DPoP key pair")
+		return nil, &codeartsauth.RotationUnavailableError{Reason: "the original DPoP key pair"}
 	}
 
 	client := codeartsauth.NewClientWithProxyURL(e.cfg, auth.ProxyURL)

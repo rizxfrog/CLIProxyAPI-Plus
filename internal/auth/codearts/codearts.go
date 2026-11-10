@@ -404,10 +404,10 @@ func (c *Client) ExchangeCode(ctx context.Context, code, verifier string, keyPai
 // because STS re-validates the proof of possession.
 func (c *Client) Refresh(ctx context.Context, refreshToken, verifier string, keyPair *DpopKeyPair) (*TokenData, error) {
 	if strings.TrimSpace(refreshToken) == "" {
-		return nil, fmt.Errorf("codearts: refresh token is empty")
+		return nil, &RotationUnavailableError{Reason: "a refresh token"}
 	}
 	if keyPair == nil {
-		return nil, fmt.Errorf("codearts: DPoP key pair is required to refresh credentials")
+		return nil, &RotationUnavailableError{Reason: "the original DPoP key pair"}
 	}
 	form := url.Values{}
 	form.Set("client_id", ClientID)
@@ -761,6 +761,27 @@ func (e *Error) IsTerminalRefreshError() bool {
 	}
 	return false
 }
+
+// RotationUnavailableError reports that a credential cannot be rotated at all
+// because it is missing something STS requires.
+//
+// Huawei Cloud re-validates proof of possession on every exchange, so a
+// credential without its original DPoP key pair can never refresh no matter how
+// often it is retried. The operator has to sign in again.
+type RotationUnavailableError struct {
+	// Reason describes what is missing.
+	Reason string
+}
+
+func (e *RotationUnavailableError) Error() string {
+	if e == nil || e.Reason == "" {
+		return "codearts: credential cannot be refreshed"
+	}
+	return "codearts: cannot refresh credentials without " + e.Reason
+}
+
+// IsTerminalRefreshError marks the failure as unrepairable by retrying.
+func (e *RotationUnavailableError) IsTerminalRefreshError() bool { return true }
 
 // signedRequest builds a request whose headers carry a Huawei Cloud signature.
 func (c *Client) signedRequest(ctx context.Context, method, endpoint string, body []byte, creds Credentials, extraHeaders map[string]string) (*http.Request, error) {

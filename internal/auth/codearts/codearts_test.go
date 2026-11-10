@@ -957,3 +957,43 @@ func TestTerminalRefreshErrors(t *testing.T) {
 		t.Error("a nil error must not be terminal")
 	}
 }
+
+// TestRotationUnavailableIsTerminal pins that a credential missing its DPoP key
+// pair is not retried forever.
+//
+// Huawei Cloud STS re-validates proof of possession on every exchange, so a
+// credential without the original key can never refresh. Retrying it leaves the
+// account reporting a retryable error indefinitely instead of asking for a fresh
+// sign-in.
+func TestRotationUnavailableIsTerminal(t *testing.T) {
+	err := &RotationUnavailableError{Reason: "the original DPoP key pair"}
+	if !err.IsTerminalRefreshError() {
+		t.Fatal("a missing DPoP key pair must be terminal")
+	}
+	if !strings.Contains(err.Error(), "DPoP") {
+		t.Fatalf("message does not name the missing piece: %q", err.Error())
+	}
+	var nilErr *RotationUnavailableError
+	if !nilErr.IsTerminalRefreshError() {
+		t.Fatal("even a nil rotation error reports no retry can help")
+	}
+
+	// Refresh must produce that type rather than an untyped error.
+	client := NewClient(nil)
+	if _, errEmpty := client.Refresh(context.Background(), "  ", "verifier", &DpopKeyPair{}); errEmpty == nil {
+		t.Fatal("an empty refresh token must fail")
+	} else {
+		var typed *RotationUnavailableError
+		if !errors.As(errEmpty, &typed) {
+			t.Fatalf("empty refresh token error is untyped: %T", errEmpty)
+		}
+	}
+	if _, errKey := client.Refresh(context.Background(), "token", "verifier", nil); errKey == nil {
+		t.Fatal("a missing key pair must fail")
+	} else {
+		var typed *RotationUnavailableError
+		if !errors.As(errKey, &typed) {
+			t.Fatalf("missing key pair error is untyped: %T", errKey)
+		}
+	}
+}
