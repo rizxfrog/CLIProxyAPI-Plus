@@ -245,6 +245,7 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	s.mgmt.SetPluginHost(optionState.pluginHost)
 	s.mgmt.SetConfigReloadHook(optionState.configReloadHook)
 	s.mgmt.SetAutoCheckinService(optionState.autoCheckinService)
+	s.mgmt.SetScheduleService(optionState.scheduleService)
 	if optionState.localPassword != "" {
 		s.mgmt.SetLocalPassword(optionState.localPassword)
 	}

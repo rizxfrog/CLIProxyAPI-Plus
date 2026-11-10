@@ -136,8 +136,10 @@ func (s *Service) Run(ctx context.Context) error {
 	}
 
 	checkinService := s.initCheckinService()
+	scheduleService := s.initScheduleService()
 	serverOptions := append([]api.ServerOption(nil), s.serverOptions...)
 	serverOptions = append(serverOptions, api.WithAutoCheckinService(checkinService))
+	serverOptions = append(serverOptions, api.WithScheduleService(scheduleService))
 
 	// handlers no longer depend on legacy clients; pass nil slice initially
 	s.server = api.NewServer(cfg, s.coreManager, s.accessManager, s.configPath, serverOptions...)
@@ -240,6 +242,9 @@ func (s *Service) Run(ctx context.Context) error {
 	if errStart := checkinService.Start(ctx, s.currentConfig()); errStart != nil {
 		return fmt.Errorf("cliproxy: start automatic checkin: %w", errStart)
 	}
+	if errStart := scheduleService.Start(ctx, s.scheduleDirectory(s.currentConfig())); errStart != nil {
+		return fmt.Errorf("cliproxy: start scheduled tasks: %w", errStart)
+	}
 
 	s.registerModelRefreshCallback()
 	if !homeEnabled {
@@ -288,6 +293,9 @@ func (s *Service) Shutdown(ctx context.Context) error {
 		}
 		if checkinService := s.currentCheckinService(); checkinService != nil {
 			checkinService.Stop()
+		}
+		if scheduleService := s.currentScheduleService(); scheduleService != nil {
+			scheduleService.Stop()
 		}
 
 		s.homeLifecycleMu.Lock()

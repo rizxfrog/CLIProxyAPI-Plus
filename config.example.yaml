@@ -158,6 +158,12 @@ access:
 #         window: { start: "00:10", end: "03:10" }
 #         headers: {}
 #         # Requires an existing compatible numeric device ID; no device ID is generated.
+#
+#   # Optional scheduled HTTP requests, managed from the panel's "Scheduled tasks"
+#   # page. Each task group is one JSON document in this directory. An empty value
+#   # disables the feature: nothing is read and no scheduler starts.
+#   schedule:
+#     dir: ./schedules
 
 # Optional credential concurrency and observation contracts.
 

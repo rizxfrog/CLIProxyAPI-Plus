@@ -32,6 +32,20 @@ func (s *Server) registerManagementV8Routes() {
 	v8.GET("/automation/checkin/providers", s.mgmt.GetAutoCheckinProviders)
 	v8.GET("/automation/checkin/status", s.mgmt.GetAutoCheckinStatus)
 
+	// Operator-authored scheduled HTTP requests. The panel addresses the v8
+	// contract exclusively, so these must exist here and not only under v0.
+	v8.GET("/automation/schedule/status", s.mgmt.GetScheduleStatus)
+	v8.GET("/automation/schedule/groups", s.mgmt.ListScheduleGroups)
+	v8.POST("/automation/schedule/groups", s.mgmt.CreateScheduleGroup)
+	v8.POST("/automation/schedule/parse-curl", s.mgmt.ParseScheduleCurl)
+	v8.GET("/automation/schedule/groups/:id", s.mgmt.GetScheduleGroup)
+	v8.PUT("/automation/schedule/groups/:id", s.mgmt.PutScheduleGroup)
+	v8.DELETE("/automation/schedule/groups/:id", s.mgmt.DeleteScheduleGroup)
+	v8.POST("/automation/schedule/groups/:id/tasks", s.mgmt.AddScheduleTasks)
+	v8.PUT("/automation/schedule/groups/:id/tasks/:task", s.mgmt.PutScheduleTask)
+	v8.DELETE("/automation/schedule/groups/:id/tasks/:task", s.mgmt.DeleteScheduleTask)
+	v8.POST("/automation/schedule/groups/:id/tasks/:task/run", s.mgmt.RunScheduleTask)
+
 	v8.GET("/server/latest-version", s.mgmt.GetLatestVersion)
 	v8.POST("/requests/api-call", s.mgmt.APICall)
 	v8.POST("/routing/cooldown/reset", s.mgmt.ResetQuota)

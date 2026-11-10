@@ -265,6 +265,13 @@ func (s *Service) applyConfigRuntime(ctx context.Context, commit configCommit, s
 		}
 		s.configUpdateMu.Unlock()
 	}
+	if scheduleService := s.currentScheduleService(); scheduleService != nil {
+		s.configUpdateMu.Lock()
+		if s.configSequence == commit.sequence && ctx.Err() == nil {
+			s.applyScheduleConfig(cfg)
+		}
+		s.configUpdateMu.Unlock()
+	}
 	return ctx.Err() == nil
 }
 

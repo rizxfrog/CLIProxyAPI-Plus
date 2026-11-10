@@ -83,6 +83,7 @@ func buildV8Paths() []configPath {
 		{"remote-management", "management"}, {"api-keys", "access.api-keys"},
 		{"credential-concurrency", "credentials.concurrency"}, {"credential-in-flight", "credentials.in-flight"},
 		{"auto-checkin", "automation.checkin"},
+		{"schedule", "automation.schedule"},
 		{"force-model-prefix", "routing.force-model-prefix"},
 		{"provider-models", "routing.provider-models"},
 		{"system-prompt-override", "requests.system-prompt-override"},

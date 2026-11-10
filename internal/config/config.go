@@ -57,6 +57,9 @@ type Config struct {
 	// AutoCheckin configures opt-in background daily rewards.
 	AutoCheckin AutoCheckinConfig `yaml:"auto-checkin,omitempty" json:"auto-checkin"`
 
+	// Schedule configures operator-authored scheduled HTTP requests.
+	Schedule ScheduleConfig `yaml:"schedule,omitempty" json:"schedule"`
+
 	// AuthDir is the directory where authentication token files are stored.
 	AuthDir string `yaml:"auth-dir" json:"-"`
 
