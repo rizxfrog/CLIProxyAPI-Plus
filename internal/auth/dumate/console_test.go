@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-const testCookie = "BDUSS=abc; bce-sessionid=def"
+const testCookie = `BDUSS=abc; bce-sessionid=def; bce-user-info="2026-11-07T10:56:10Z|csrf-sig"`
 
 func consoleServer(t *testing.T, handler http.HandlerFunc) (*ConsoleClient, *httptest.Server) {
 	t.Helper()
@@ -185,6 +185,81 @@ func TestLoginBonusInfoAndClaim(t *testing.T) {
 	}
 }
 
+func TestConsoleCSRFTokenFromUserInfoCookie(t *testing.T) {
+	for cookie, want := range map[string]string{
+		`bce-user-info="2026-11-07T10:56:10Z|abc"; BDUSS=x`: "2026-11-07T10:56:10Z|abc",
+		`bce-user-info=tok; bce-user-info=second`:           "tok",
+		`BDUSS=x; BAIDUID=y`:                                "",
+		``:                                                  "",
+	} {
+		if got := consoleCSRFToken(cookie); got != want {
+			t.Fatalf("consoleCSRFToken(%q) = %q, want %q", cookie, got, want)
+		}
+	}
+}
+
+// The console accepts reads without a CSRF token but rejects every write with a
+// misleading "login expired" body, so the token is what makes a claim work.
+func TestConsoleSendsCSRFOnlyOnWrites(t *testing.T) {
+	cookie := `BDUSS=abc; bce-user-info="csrf-1|sig"`
+	var readCSRF, writeCSRF []string
+	var readMethod string
+	client, _ := consoleServer(t, func(w http.ResponseWriter, r *http.Request) {
+		values := r.Header.Values("csrftoken")
+		if r.URL.Path == consoleLoginBonusPath {
+			writeCSRF = values
+			_, _ = w.Write([]byte(successEnvelope(t, true)))
+			return
+		}
+		readMethod = r.Method
+		readCSRF = values
+		_, _ = w.Write([]byte(successEnvelope(t, map[string]any{"hasIssued": false, "signInDays": []string{}})))
+	})
+
+	if _, err := client.FetchLoginBonusInfo(context.Background(), cookie); err != nil {
+		t.Fatalf("FetchLoginBonusInfo() error = %v", err)
+	}
+	if readMethod != http.MethodGet {
+		t.Fatalf("read used %s", readMethod)
+	}
+	// Reads are authenticated by the cookie alone; sending the token there is
+	// harmless but must not be required for the read to be correct.
+	if len(readCSRF) > 1 {
+		t.Fatalf("read sent %d csrf headers", len(readCSRF))
+	}
+
+	claimed, err := client.ClaimLoginBonus(context.Background(), cookie)
+	if err != nil || !claimed {
+		t.Fatalf("ClaimLoginBonus() = %v, %v", claimed, err)
+	}
+	if len(writeCSRF) != 1 || writeCSRF[0] != "csrf-1|sig" {
+		t.Fatalf("write csrftoken = %v, want the bce-user-info value", writeCSRF)
+	}
+}
+
+func TestConsoleWriteHeadersMatchTheDesktopClient(t *testing.T) {
+	cookie := `BDUSS=abc; bce-user-info="csrf-1|sig"`
+	var seen http.Header
+	client, _ := consoleServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == consoleLoginBonusPath {
+			seen = r.Header.Clone()
+		}
+		_, _ = w.Write([]byte(successEnvelope(t, true)))
+	})
+	if _, err := client.ClaimLoginBonus(context.Background(), cookie); err != nil {
+		t.Fatalf("ClaimLoginBonus() error = %v", err)
+	}
+	for header, want := range map[string]string{
+		"Content-Type":     "application/json",
+		"X-Requested-With": "XMLHttpRequest",
+		"Origin":           ConsoleBaseURL,
+	} {
+		if got := seen.Get(header); got != want {
+			t.Fatalf("%s = %q, want %q", header, got, want)
+		}
+	}
+}
+
 func TestClaimLoginBonusReportsRefusal(t *testing.T) {
 	client, _ := consoleServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(successEnvelope(t, false)))
@@ -195,6 +270,85 @@ func TestClaimLoginBonusReportsRefusal(t *testing.T) {
 	}
 	if claimed {
 		t.Fatal("a refused claim must not report true")
+	}
+}
+
+// A tokenless write would be answered with a misleading "login expired" body,
+// so the client refuses to send it and reports a session problem directly.
+func TestClaimWithoutCSRFTokenNeverReachesTheConsole(t *testing.T) {
+	called := false
+	client, _ := consoleServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == consoleLoginBonusPath {
+			called = true
+			_, _ = w.Write([]byte(successEnvelope(t, true)))
+			return
+		}
+		_, _ = w.Write([]byte(successEnvelope(t, map[string]any{"hasIssued": false, "signInDays": []string{}})))
+	})
+	_, err := client.ClaimLoginBonus(context.Background(), "BDUSS=abc; bce-sessionid=def")
+	var upstreamErr *ConsoleError
+	if !errors.As(err, &upstreamErr) {
+		t.Fatalf("error = %v, want *ConsoleError", err)
+	}
+	if !upstreamErr.SessionExpired() {
+		t.Fatalf("SessionExpired() = false for %+v", upstreamErr)
+	}
+	if called {
+		t.Fatal("a tokenless claim must not be sent upstream")
+	}
+	// Reads still work: the token is only needed for writes.
+	if _, errRead := client.FetchLoginBonusInfo(context.Background(), "BDUSS=abc"); errRead != nil {
+		t.Fatalf("read without csrf failed: %v", errRead)
+	}
+}
+
+// A rejected session replies HTTP 200 with an object in "message". Decoding it
+// as a string used to fail the whole response, hiding the reason.
+func TestConsoleSessionExpiredEnvelope(t *testing.T) {
+	client, _ := consoleServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"success":false,"message":{"global":"登录凭证已过期，请重新登录"}}`))
+	})
+	_, err := client.ClaimLoginBonus(context.Background(), testCookie)
+	var upstreamErr *ConsoleError
+	if !errors.As(err, &upstreamErr) {
+		t.Fatalf("error = %v, want *ConsoleError", err)
+	}
+	if upstreamErr.Code != 0 || !strings.Contains(upstreamErr.Message, "登录凭证已过期") {
+		t.Fatalf("console error = %+v", upstreamErr)
+	}
+	if !upstreamErr.SessionExpired() {
+		t.Fatalf("SessionExpired() = false for %+v", upstreamErr)
+	}
+}
+
+func TestConsoleMessageObjectWithoutGlobal(t *testing.T) {
+	// Failures that are not about the session must still decode and must not be
+	// mistaken for an expiry, otherwise every error would become a re-login.
+	client, _ := consoleServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"success":false,"code":500,"message":{"scope":"points","detail":"unavailable"}}`))
+	})
+	_, err := client.ClaimLoginBonus(context.Background(), testCookie)
+	var upstreamErr *ConsoleError
+	if !errors.As(err, &upstreamErr) {
+		t.Fatalf("error = %v, want *ConsoleError", err)
+	}
+	if upstreamErr.SessionExpired() {
+		t.Fatalf("SessionExpired() = true for %+v", upstreamErr)
+	}
+	if !strings.Contains(upstreamErr.Message, "unavailable") {
+		t.Fatalf("message = %q", upstreamErr.Message)
+	}
+}
+
+func TestConsoleSessionExpiredOnUnauthorized(t *testing.T) {
+	client, _ := consoleServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"success":false}`))
+	})
+	_, err := client.ClaimLoginBonus(context.Background(), testCookie)
+	var upstreamErr *ConsoleError
+	if !errors.As(err, &upstreamErr) || !upstreamErr.SessionExpired() {
+		t.Fatalf("error = %v", err)
 	}
 }
 
@@ -282,16 +436,16 @@ func TestConsoleCookieDomainMatching(t *testing.T) {
 		".baidu.com":           true,
 		"baidu.com":            true,
 		".bce.baidu.com":       true,
-		"login.bce.baidu.com":  true,
-		".passport.baidu.com":  true,
-		".hm.baidu.com":        true,
+		"login.bce.baidu.com":  false,
+		".passport.baidu.com":  false,
+		".hm.baidu.com":        false,
 		".ptlogin2.qq.com":     false,
 		".baidu.com.evil.test": false,
 		"notbaidu.com":         false,
-		"":                     false,
+		"":                     true,
 	} {
-		if got := isBaiduCookieDomain(domain); got != want {
-			t.Fatalf("isBaiduCookieDomain(%q) = %v, want %v", domain, got, want)
+		if got := cookieMatchesHost(domain, consoleHost); got != want {
+			t.Fatalf("cookieMatchesHost(%q) = %v, want %v", domain, got, want)
 		}
 	}
 }

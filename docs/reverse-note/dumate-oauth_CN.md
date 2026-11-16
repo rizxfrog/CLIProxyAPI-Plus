@@ -1184,9 +1184,21 @@ Cookie 中的 `BDUSS` 是百度账号 session，不是 IAM token。DuMate 通过
 
 - Host：`https://console.bce.baidu.com` —— **不在本地后端**（`dumate-main-server` 只代理
   `/api/qianfanproxy/*` 推理）。积分/签到走 Electron 主进程的 `bceConsoleRequest`，直连百度云控制台。
-- 鉴权：**纯 Cookie 会话**，无 Bearer、无签名、无 CSRF 头；主进程先 `[Cookie] decrypt`（见 §19，
+- 鉴权：**纯 Cookie 会话**，无 Bearer、无签名；主进程先 `[Cookie] decrypt`（见 §19，
   AES-256-GCM / `.cookie-key`）再把 cookie 注入请求。关键 cookie：
   `BDUSS`、`BDUSS_BFESS`、`bce-sessionid`、`bce-session`、`bce-passport-stoken`、`bce-login-accountid`。
+- **写请求必须带 CSRF 头**（2026-11-16 runtime-confirmed，客户端 `build-ts-electron/component/session-proxy/console-client.js`
+  与 `utils/cookie.js` 源码确认）：
+  ```http
+  csrftoken: <bce-user-info cookie 的值，去掉外层引号>
+  Content-Type: application/json
+  X-Requested-With: XMLHttpRequest
+  Origin: https://console.bce.baidu.com
+  Referer: https://console.bce.baidu.com/
+  ```
+  GET（`quota_overview`、`loginBonusInfo`）不带 `csrftoken` 也返回 200；
+  **POST 不带则一律 HTTP 200 + `{"success":false,"message":{"global":"登录凭证已过期，请重新登录"}}`**，
+  与真实会话是否过期无关。因此该文案不能作为「需要重新登录」的判据。
 - 响应信封统一为：
 
   ```json
@@ -1194,6 +1206,8 @@ Cookie 中的 `BDUSS` 是百度账号 session，不是 IAM token。DuMate 通过
   ```
 
   `code == 0 && success == true` 为成功。HTTP 200 不代表业务成功，须看 `code`。
+- 失败信封的 `message` **可能是对象**而不是字符串，常见形态
+  `{"global":"<文案>"}`；按字符串反序列化会整包解码失败，把真实原因吞掉。
 
 ### 21.2 积分额度（对应设置 → 积分明细）
 

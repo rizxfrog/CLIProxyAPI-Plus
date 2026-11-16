@@ -170,12 +170,13 @@ func decryptCookieJar(encoded string, key []byte) ([]byte, error) {
 	return plaintext, nil
 }
 
-// consoleCookieHeader turns the decrypted jar into a Cookie header value.
+// consoleCookieHeader turns the decrypted jar into a Cookie header value for
+// the console origin.
 //
-// Only unexpired Baidu cookies are sent: the console rejects a request that
-// carries nothing useful, and the analytics hosts in the same jar (hm.baidu.com)
-// are irrelevant to it. Ties on cookie name are preserved in order, matching
-// what the desktop client's own HTTP stack sends.
+// The shape follows the desktop client's own serializer: every cookie whose
+// domain matches the console host is sent, values are unquoted, and a value that
+// still contains a delimiter is wrapped in quotes so it cannot be misparsed.
+// Sending a different set would change which session the console sees.
 func consoleCookieHeader(plaintext []byte, now time.Time) (string, error) {
 	var jar []storedCookie
 	if err := json.Unmarshal(plaintext, &jar); err != nil {
@@ -188,7 +189,7 @@ func consoleCookieHeader(plaintext []byte, now time.Time) (string, error) {
 		if name == "" || entry.Value == "" {
 			continue
 		}
-		if !isBaiduCookieDomain(entry.Domain) {
+		if !cookieMatchesHost(entry.Domain, consoleHost) {
 			continue
 		}
 		expiry := entry.ExpirationDate
@@ -198,7 +199,14 @@ func consoleCookieHeader(plaintext []byte, now time.Time) (string, error) {
 		if expiry != nil && *expiry > 0 && *expiry <= nowSeconds {
 			continue
 		}
-		parts = append(parts, name+"="+entry.Value)
+		value := strings.Trim(strings.TrimSpace(entry.Value), `"'`)
+		if value == "" {
+			continue
+		}
+		if strings.ContainsAny(value, ":|;= \t") {
+			value = `"` + value + `"`
+		}
+		parts = append(parts, name+"="+value)
 	}
 	if len(parts) == 0 {
 		return "", fmt.Errorf("dumate: no usable Baidu console cookie in the client store")
@@ -206,7 +214,18 @@ func consoleCookieHeader(plaintext []byte, now time.Time) (string, error) {
 	return strings.Join(parts, "; "), nil
 }
 
-func isBaiduCookieDomain(domain string) bool {
+// cookieMatchesHost reports whether a stored cookie domain applies to host.
+//
+// The client filters by suffix rather than by registrable domain, so analytics
+// hosts that share the parent name are included exactly as they are upstream.
+func cookieMatchesHost(domain, host string) bool {
 	normalized := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(domain), "."))
-	return normalized == "baidu.com" || strings.HasSuffix(normalized, ".baidu.com")
+	if normalized == "" {
+		return true
+	}
+	return host == normalized || strings.HasSuffix(host, "."+normalized)
 }
+
+// consoleHost is the console origin's hostname, the value cookie domains are
+// matched against.
+const consoleHost = "console.bce.baidu.com"

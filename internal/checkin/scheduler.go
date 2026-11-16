@@ -40,6 +40,14 @@ type accountIdentity interface{ Identity(*coreauth.Auth) string }
 // Metadata dependencies are repair hints, not mandatory-field validation rules.
 type metadataDependencies interface{ RequiredMetadata() []string }
 
+// externalDependency reports a value a credential depends on that does not live
+// in its metadata, such as a session the operator refreshes on the local client.
+//
+// It is a repair hint like metadataDependencies: the returned string is hashed
+// and compared between reconciliations, so a change replans a blocked account.
+// Adapters that store everything in metadata omit it.
+type externalDependency interface{ ExternalDependency(*coreauth.Auth) string }
+
 type providerRuntime struct {
 	config        config.CheckinProviderConfig
 	fingerprint   string
@@ -351,6 +359,13 @@ func (s *Service) reconcile() {
 		repair := ""
 		if replan || (plan != nil && plan.status.Phase == "blocked") {
 			repair = dependencyFingerprint(auth.Metadata, runtime.paths)
+			if provider, ok := s.adapters[auth.Provider].(externalDependency); ok {
+				// Fold the opaque value in so a refreshed session outside the
+				// credential file still counts as a repair.
+				if value := provider.ExternalDependency(auth); value != "" {
+					repair = Fingerprint(repair + "\x00" + value)
+				}
+			}
 		}
 		credentialRepaired := plan != nil && plan.status.Error == "credential_unavailable" && plan.credentialVersion != auth.CredentialVersion
 		if plan != nil && plan.status.Phase == "blocked" && (plan.repair != repair || credentialRepaired) {

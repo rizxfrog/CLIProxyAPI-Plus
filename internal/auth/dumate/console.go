@@ -21,6 +21,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 )
 
@@ -46,6 +47,9 @@ type ConsoleError struct {
 	Code       int
 	Message    string
 	LogID      string
+	// SessionInvalid marks a failure that no retry can fix because the stored
+	// session cannot authorize the call at all.
+	SessionInvalid bool
 }
 
 func (e *ConsoleError) Error() string {
@@ -57,6 +61,31 @@ func (e *ConsoleError) Error() string {
 	default:
 		return "dumate console error"
 	}
+}
+
+// SessionExpired reports whether the console refused the request because the
+// stored login session is no longer usable.
+//
+// The session check lives with the client because a stale session is not a
+// transient upstream fault: the credential cannot recover on its own, so
+// callers must surface it as a re-login requirement instead of retrying.
+func (e *ConsoleError) SessionExpired() bool {
+	if e == nil {
+		return false
+	}
+	if e.SessionInvalid {
+		return true
+	}
+	if e.StatusCode == http.StatusUnauthorized || e.StatusCode == http.StatusForbidden {
+		return true
+	}
+	// The console answers a rejected session with HTTP 200 and a localized
+	// message, so the text is the only signal available. Sending the CSRF header
+	// keeps this text meaningful: without it, every write reports the same thing.
+	return strings.Contains(e.Message, "登录凭证已过期") ||
+		strings.Contains(e.Message, "请重新登录") ||
+		strings.Contains(strings.ToLower(e.Message), "not logged in") ||
+		strings.Contains(strings.ToLower(e.Message), "login expired")
 }
 
 // ConsoleClient performs authenticated console requests with an injected HTTP
@@ -147,9 +176,62 @@ func (i *LoginBonusInfo) SignedInOn(day string) bool {
 type consoleEnvelope struct {
 	LogID   string          `json:"logId"`
 	Code    int             `json:"code"`
-	Message string          `json:"message"`
+	Message consoleMessage  `json:"message"`
 	Success bool            `json:"success"`
 	Result  json.RawMessage `json:"result"`
+}
+
+// consoleMessage accepts both message shapes the console returns: a plain
+// string on success, and an object such as {"global":"..."} on failure. The
+// object form is what a rejected session looks like, so decoding it as a string
+// would turn every expired cookie into an opaque parse error.
+type consoleMessage struct {
+	Text string
+}
+
+func (m *consoleMessage) UnmarshalJSON(data []byte) error {
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" || trimmed == "null" {
+		m.Text = ""
+		return nil
+	}
+	if trimmed[0] == '"' {
+		var text string
+		if err := json.Unmarshal(data, &text); err != nil {
+			return err
+		}
+		m.Text = strings.TrimSpace(text)
+		return nil
+	}
+	if trimmed[0] != '{' {
+		// Any other scalar shape is unexpected but must not fail the response.
+		m.Text = trimmed
+		return nil
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	// "global" is the console's general failure slot.
+	if global, ok := fields["global"].(string); ok {
+		if text := strings.TrimSpace(global); text != "" {
+			m.Text = text
+			return nil
+		}
+	}
+	keys := make([]string, 0, len(fields))
+	for key := range fields {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if text := strings.TrimSpace(fmt.Sprint(fields[key])); text != "" {
+			parts = append(parts, key+": "+text)
+		}
+	}
+	m.Text = strings.Join(parts, "; ")
+	return nil
 }
 
 // FetchPointsOverview reads the points wallet.
@@ -223,7 +305,14 @@ func (c *ConsoleClient) do(ctx context.Context, method, cookie, path string) (js
 	if err != nil {
 		return nil, fmt.Errorf("dumate console: build request: %w", err)
 	}
-	applyConsoleHeaders(req, cookie)
+	csrfToken := consoleCSRFToken(cookie)
+	if csrfToken == "" && method != http.MethodGet && method != http.MethodHead {
+		// Fail before the call: the console would answer a tokenless write with a
+		// misleading "login expired" body, turning a header bug into a phantom
+		// credential problem.
+		return nil, &ConsoleError{Message: "console session is missing its CSRF token", SessionInvalid: true}
+	}
+	applyConsoleHeaders(req, cookie, csrfToken)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -251,18 +340,47 @@ func (c *ConsoleClient) do(ctx context.Context, method, cookie, path string) (js
 		return nil, &ConsoleError{
 			StatusCode: resp.StatusCode,
 			Code:       envelope.Code,
-			Message:    strings.TrimSpace(envelope.Message),
+			Message:    envelope.Message.Text,
 			LogID:      envelope.LogID,
 		}
 	}
 	return envelope.Result, nil
 }
 
+// consoleCSRFToken returns the CSRF token the console requires on writes.
+//
+// The desktop client reads it from the bce-user-info cookie, stripping the
+// surrounding quotes; sending it back verbatim as the csrftoken header is what
+// authorizes a state change. Reads work without it, so a missing token only
+// surfaces when a claim is attempted.
+func consoleCSRFToken(cookie string) string {
+	for _, part := range strings.Split(cookie, ";") {
+		name, value, ok := strings.Cut(strings.TrimSpace(part), "=")
+		if !ok || name != "bce-user-info" {
+			continue
+		}
+		return strings.Trim(strings.TrimSpace(value), `"'`)
+	}
+	return ""
+}
+
 // applyConsoleHeaders mirrors the identity headers the desktop client sends.
 // The session itself is carried entirely by the cookie.
-func applyConsoleHeaders(req *http.Request, cookie string) {
+//
+// The csrftoken header is not optional: the console accepts reads without it but
+// rejects every write with a misleading "login expired" body, which is why a
+// claim must reproduce the client's own header set.
+func applyConsoleHeaders(req *http.Request, cookie, csrfToken string) {
 	req.Header.Set("Cookie", cookie)
 	req.Header.Set("Accept", "application/json, text/plain, */*")
+	if csrfToken != "" {
+		req.Header.Set("csrftoken", csrfToken)
+	}
+	if req.Method != http.MethodGet && req.Method != http.MethodHead {
+		// The client's own write requests declare a JSON body even when empty.
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Requested-With", "XMLHttpRequest")
+	}
 	req.Header.Set("Origin", ConsoleBaseURL)
 	req.Header.Set("Referer", ConsoleBaseURL+"/")
 	req.Header.Set("User-Agent", consoleUserAgent)

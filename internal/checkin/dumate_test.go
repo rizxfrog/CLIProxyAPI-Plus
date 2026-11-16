@@ -49,7 +49,7 @@ func dumateAccount() *coreauth.Auth {
 		Provider: "dumate",
 		Metadata: map[string]any{
 			dumateauth.FieldAccountID:     "acct-1",
-			dumateauth.FieldConsoleCookie: "BDUSS=test-cookie",
+			dumateauth.FieldConsoleCookie: `BDUSS=test-cookie; bce-user-info="2026-11-07T10:56:10Z|csrf-sig"`,
 		},
 	}
 }
@@ -62,7 +62,7 @@ func TestDumateCheckinSkipsAnAlreadyClaimedDay(t *testing.T) {
 	day := "2026-11-07"
 	claims := 0
 	ctx := dumateCheckinContext(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Cookie") != "BDUSS=test-cookie" {
+		if r.Header.Get("Cookie") != `BDUSS=test-cookie; bce-user-info="2026-11-07T10:56:10Z|csrf-sig"` {
 			t.Errorf("cookie = %q", r.Header.Get("Cookie"))
 		}
 		if r.Method != http.MethodGet || r.URL.Path != "/api/dumate/points/loginBonusInfo" {
@@ -148,15 +148,116 @@ func TestDumateCheckinReportsARefusedClaim(t *testing.T) {
 
 func TestDumateCheckinReportsAnUpstreamFailure(t *testing.T) {
 	ctx := dumateCheckinContext(t, func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"logId":"log-2","code":1001,"message":"登录凭证已过期","success":false}`))
+		_, _ = w.Write([]byte(`{"logId":"log-2","code":1001,"message":"upstream boom","success":false}`))
 	})
 
 	result := dumateAdapter{}.CheckIn(ctx, &config.Config{}, dumateAccount(), nil, "2026-11-08")
 	if result.Outcome != OutcomeFailed {
 		t.Fatalf("outcome = %q", result.Outcome)
 	}
+	if result.Message != "dumate_checkin_failed" {
+		t.Fatalf("message = %q", result.Message)
+	}
 	if strings.Contains(result.Message, "secret") {
 		t.Fatalf("message leaked upstream detail: %q", result.Message)
+	}
+}
+
+// An expired console session answers HTTP 200 with an object-shaped message, so
+// the classification must survive both the envelope shape and the safe-code
+// filter that used to collapse it into a generic failure.
+func TestDumateCheckinBlocksAnExpiredConsoleSession(t *testing.T) {
+	ctx := dumateCheckinContext(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"success":false,"message":{"global":"登录凭证已过期，请重新登录"}}`))
+	})
+
+	result := dumateAdapter{}.CheckIn(ctx, &config.Config{}, dumateAccount(), nil, "2026-11-08")
+	if result.Outcome != OutcomeBlocked {
+		t.Fatalf("outcome = %q (%s)", result.Outcome, result.Message)
+	}
+	// The scheduler re-plans an account blocked on "credential_unavailable" once
+	// its credential changes, so the code is what makes a re-login recover.
+	if result.Message != "credential_unavailable" {
+		t.Fatalf("message = %q", result.Message)
+	}
+	if result.Warning != "dumate_console_session_expired" {
+		t.Fatalf("warning = %q", result.Warning)
+	}
+	if strings.Contains(result.Warning, "登录") {
+		t.Fatalf("warning leaked upstream text: %q", result.Warning)
+	}
+}
+
+func TestDumateCheckinBlocksAnExpiredClaim(t *testing.T) {
+	// The read endpoint can still answer from a cached session while the claim
+	// rejects it; the claim is where the expiry usually shows up.
+	ctx := dumateCheckinContext(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/dumate/points/loginBonusInfo" {
+			_, _ = w.Write([]byte(envelope(`{"hasIssued":false,"signInDays":[]}`)))
+			return
+		}
+		_, _ = w.Write([]byte(`{"success":false,"message":{"global":"登录凭证已过期，请重新登录"}}`))
+	})
+
+	result := dumateAdapter{}.CheckIn(ctx, &config.Config{}, dumateAccount(), nil, "2026-11-08")
+	if result.Outcome != OutcomeBlocked || result.Message != "credential_unavailable" {
+		t.Fatalf("outcome = %q (%s)", result.Outcome, result.Message)
+	}
+	if result.Warning != "dumate_console_session_expired" {
+		t.Fatalf("warning = %q", result.Warning)
+	}
+}
+
+// A claim refuses with the same expiry text when another window already took
+// today's bonus, so the refusal alone must not be reported as a dead session.
+func TestDumateCheckinTreatsALosingClaimRaceAsAlreadyDone(t *testing.T) {
+	day := "2026-11-08"
+	infoReads := 0
+	ctx := dumateCheckinContext(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/dumate/points/loginBonusInfo":
+			infoReads++
+			if infoReads == 1 {
+				_, _ = w.Write([]byte(envelope(`{"hasIssued":false,"signInDays":["2026-11-07"]}`)))
+				return
+			}
+			_, _ = w.Write([]byte(envelope(`{"hasIssued":true,"signInDays":["2026-11-07","` + day + `"]}`)))
+		default:
+			_, _ = w.Write([]byte(`{"success":false,"message":{"global":"登录凭证已过期，请重新登录"}}`))
+		}
+	})
+
+	result := dumateAdapter{}.CheckIn(ctx, &config.Config{}, dumateAccount(), nil, day)
+	if result.Outcome != OutcomeAlreadyDone {
+		t.Fatalf("outcome = %q (%s)", result.Outcome, result.Message)
+	}
+	if result.Warning != "" {
+		t.Fatalf("warning = %q", result.Warning)
+	}
+}
+
+// The console cookie normally lives in the local client's store, so a re-login
+// changes no credential metadata. The dependency fingerprint is what lets the
+// scheduler notice the new session and retry the same day.
+func TestDumateExternalDependencyTracksTheConsoleSession(t *testing.T) {
+	adapter := dumateAdapter{}
+	first := adapter.ExternalDependency(dumateAccount())
+	if first == "" {
+		t.Fatal("dependency is empty")
+	}
+	if first != adapter.ExternalDependency(dumateAccount()) {
+		t.Fatal("dependency is not stable for an unchanged credential")
+	}
+	rotated := dumateAccount()
+	rotated.Metadata[dumateauth.FieldConsoleCookie] = "BDUSS=rotated-cookie"
+	if adapter.ExternalDependency(rotated) == first {
+		t.Fatal("a re-exported cookie must change the dependency")
+	}
+	if strings.Contains(first, "test-cookie") {
+		t.Fatal("dependency leaked the cookie value")
+	}
+	if got := adapter.ExternalDependency(nil); got != "" {
+		t.Fatalf("nil dependency = %q", got)
 	}
 }
 
