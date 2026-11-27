@@ -507,6 +507,11 @@ func (s *Service) registerModelsForAuthWithConfigAndCache(ctx context.Context, c
 			// static catalogue is only a fallback.
 			s.asyncProbeXiaohuanxiongCatalogue(ctx, a, key)
 		}
+		if strings.EqualFold(strings.TrimSpace(a.Provider), constant.Trae) {
+			// The SOLO gateway owns the real per-account list; the static
+			// catalogue is only a fallback.
+			s.asyncProbeTraeCatalogue(ctx, a, key)
+		}
 		return published
 	}
 
@@ -531,6 +536,9 @@ func (s *Service) registerModelsForAuthWithConfigAndCache(ctx context.Context, c
 	}
 	if provider == constant.Xiaohuanxiong {
 		s.asyncProbeXiaohuanxiongCatalogue(ctx, a, key)
+	}
+	if provider == constant.Trae {
+		s.asyncProbeTraeCatalogue(ctx, a, key)
 	}
 	return published
 }

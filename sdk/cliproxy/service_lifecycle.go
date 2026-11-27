@@ -255,6 +255,7 @@ func (s *Service) Run(ctx context.Context) error {
 		go s.runCodeArtsModelRefresh(ctx)
 		go s.runCodeBuddyModelRefresh(ctx)
 		go s.runXiaohuanxiongModelRefresh(ctx)
+		go s.runTraeModelRefresh(ctx)
 	}
 
 	select {

@@ -1553,6 +1553,11 @@ plugins:
 # TRAE SOLO CN desktop credential. Copy the Cloud-IDE-JWT access token from a
 # logged-in desktop client (or use the login.sh flow from traework2api) and paste
 # it as api-key. Set refresh-token to enable automatic ExchangeToken rotation.
+#
+# The model list is fetched live from the SOLO gateway
+# (GET /api/ide/v1/model_list) with this credential and refreshed every 3 hours.
+# The built-in catalog is only a fallback until the first fetch succeeds, so
+# `models` below is not required.
 # trae-api-key:
 #   - api-key: "YOUR_CLOUD_IDE_JWT"
 #     refresh-token: "YOUR_REFRESH_TOKEN" # optional: enables automatic token rotation
@@ -1562,10 +1567,10 @@ plugins:
 #     api-host: "https://api.trae.com.cn" # optional: ExchangeToken / GetUserInfo host
 #     base-url: "https://trae-api-cn.mchost.guru" # optional: SOLO agent gateway
 #     weight: 1
-#     prefix: "trae"                      # optional: require trae/glm-5.2
+#     prefix: "trae"                      # optional: require trae/glm-5.3
 #     models:
-#       - name: "glm-5.2"                 # upstream config_name
-#         alias: "glm-5.2"
+#       - name: "glm-5.3"                 # upstream config_name
+#         alias: "glm-5.3"
 #
 # Daily checkin note:
 #   The OAuth flow generates a random hex32 device-id. The checkin status endpoint

@@ -39,6 +39,7 @@ docs/*
 !docs/scripts/
 !docs/reverse-toolkit/
 !docs/reverse-note/
+!docs/providers/
 !docs/management-api-v8.md
 !docs/models-refresh
 AGENTS.md

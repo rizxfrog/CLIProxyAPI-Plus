@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	traeauth "github.com/router-for-me/CLIProxyAPI/v8/internal/auth/trae"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/constant"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor/helps"
@@ -29,18 +30,16 @@ import (
 // TraeWork 桌面客户端（TRAE SOLO CN）上游常量。
 // 逆向自 https://github.com/router-for-me/traework2api，对应 SOLO 中国版
 // solo_work_lite 免费对话通道。
+// The gateway host, app id and IDE version live in internal/auth/trae so the
+// catalogue probe and the executor authenticate with one definition.
 const (
 	// TraeAgentHost is the SOLO CN agent gateway used by the desktop IDE.
-	TraeAgentHost = "https://trae-api-cn.mchost.guru"
-	// TraeUgHost hosts the check-in / credits endpoints.
-	TraeUgHost = "https://api.trae.cn"
+	TraeAgentHost = traeauth.AgentHost
 	// TraeOAuthHost hosts ExchangeToken / GetUserInfo.
 	TraeOAuthHost = "https://api.trae.com.cn"
 
 	// TraeClientID is the public OAuth client id shipped with the SOLO desktop client.
 	TraeClientID = "en1oxy7wnw8j9n"
-	// TraeAppID is the desktop IDE application id.
-	TraeAppID = "6eefa01c-1036-4c7e-9ca5-d891f63bfcd8"
 	// TraeFunction is the SOLO work-lite free chat function.
 	TraeFunction = "solo_work_lite"
 
@@ -49,21 +48,19 @@ const (
 	// client build: an outdated version makes the model list omit them and chat
 	// requests answer 4001 "param is invalid". Keep in sync with the shipped
 	// desktop client (reverse-engineered: app 1.107.1 -> X-Ide-Version 0.1.52).
-	TraeIdeVersion = "0.1.52"
-	// TraeIdeVersionCode is the desktop IDE build code sent in headers.
-	TraeIdeVersionCode = "20260901"
+	TraeIdeVersion = traeauth.IdeVersion
 
 	// TraeChatPath is the llm_utils_chat endpoint path.
 	TraeChatPath = "/api/agent/v3/llm_utils_chat"
-	// TraeModelsPath is the get_detail_param endpoint path.
-	TraeModelsPath = "/api/ide/v1/get_detail_param"
 	// TraeExchangePath is the OAuth token exchange endpoint path.
 	TraeExchangePath = "/cloudide/api/v3/trae/oauth/ExchangeToken"
 	// TraeUserInfoPath is the OAuth GetUserInfo endpoint path.
 	TraeUserInfoPath = "/cloudide/api/v3/trae/GetUserInfo"
 
-	// TraeDefaultModel is used when the client does not supply a model.
-	TraeDefaultModel = "glm-5.2"
+	// TraeDefaultModel is used when the client does not supply a model. glm-5.2
+	// was retired upstream (verified: the live solo_work_lite catalogue now
+	// starts at glm-5.3), so this tracks a model the gateway still serves.
+	TraeDefaultModel = "glm-5.3"
 )
 
 // traeAuthCredentials carries the resolved Trae credential snapshot for one
@@ -75,6 +72,17 @@ type traeAuthCredentials struct {
 	uid          string
 	machineID    string
 	deviceID     string
+}
+
+// agentHeaders maps the executor credential snapshot onto the shared desktop
+// identity used by the agent gateway helpers.
+func (c traeAuthCredentials) agentHeaders() traeauth.AgentHeaders {
+	return traeauth.AgentHeaders{
+		AccessToken: c.accessToken,
+		UID:         c.uid,
+		MachineID:   c.machineID,
+		DeviceID:    c.deviceID,
+	}
 }
 
 // TraeExecutor translates OpenAI chat requests to the TRAE SOLO CN desktop
@@ -111,13 +119,7 @@ func (e *TraeExecutor) PrepareRequest(req *http.Request, auth *cliproxyauth.Auth
 		return nil
 	}
 	creds := traeCredentialsFromAuth(auth)
-	if creds.accessToken != "" {
-		req.Header.Set("Authorization", "Cloud-IDE-JWT "+creds.accessToken)
-		req.Header.Set("X-Cloudide-Token", creds.accessToken)
-		req.Header.Set("X-Ide-Token", creds.accessToken)
-	}
-	applyTraeCommonHeaders(req, auth, creds, true)
-	applyTraeDesktopHeaders(req, auth, creds)
+	applyTraeChatHeaders(req, auth, creds, true)
 	if auth != nil {
 		util.ApplyCustomHeadersFromAttrs(req, auth.Attributes)
 	}
@@ -579,52 +581,15 @@ func traeCredentialsFromAuth(auth *cliproxyauth.Auth) traeAuthCredentials {
 	return creds
 }
 
-// applyTraeChatHeaders sets the llm_utils_chat request headers.
+// applyTraeChatHeaders sets the llm_utils_chat request headers. The SOLO agent
+// gateway headers are shared with the model-list probe in internal/auth/trae so
+// both surfaces authenticate as the same desktop client.
 func applyTraeChatHeaders(req *http.Request, auth *cliproxyauth.Auth, creds traeAuthCredentials, stream bool) {
-	applyTraeCommonHeaders(req, auth, creds, stream)
-	applyTraeDesktopHeaders(req, auth, creds)
+	identity := creds.agentHeaders()
+	traeauth.ApplyAgentHeaders(req, identity, stream)
+	traeauth.ApplyDesktopHeaders(req, identity)
 	if auth != nil {
 		util.ApplyCustomHeadersFromAttrs(req, auth.Attributes)
-	}
-}
-
-// applyTraeCommonHeaders sets the auth / content negotiation headers shared
-// by the SOLO agent endpoints.
-func applyTraeCommonHeaders(req *http.Request, auth *cliproxyauth.Auth, creds traeAuthCredentials, stream bool) {
-	req.Header.Set("Content-Type", "application/json")
-	if stream {
-		req.Header.Set("Accept", "text/event-stream")
-	} else {
-		req.Header.Set("Accept", "application/json")
-	}
-	req.Header.Set("User-Agent", "Trae/"+TraeIdeVersion)
-	if creds.accessToken != "" {
-		req.Header.Set("Authorization", "Cloud-IDE-JWT "+creds.accessToken)
-		req.Header.Set("X-Cloudide-Token", creds.accessToken)
-		req.Header.Set("X-Ide-Token", creds.accessToken)
-	}
-	if creds.uid != "" {
-		req.Header.Set("X-Uid", creds.uid)
-	}
-}
-
-// applyTraeDesktopHeaders sets the desktop-IDE identification headers.
-func applyTraeDesktopHeaders(req *http.Request, auth *cliproxyauth.Auth, creds traeAuthCredentials) {
-	req.Header.Set("X-App-Id", TraeAppID)
-	req.Header.Set("X-App-Version", "default")
-	req.Header.Set("X-Ide-Version", TraeIdeVersion)
-	req.Header.Set("X-Ide-Version-Code", TraeIdeVersionCode)
-	req.Header.Set("X-App-Version-Code", TraeIdeVersionCode)
-	req.Header.Set("X-Ide-Version-Type", "stable")
-	req.Header.Set("X-Device-Type", "windows")
-	req.Header.Set("X-OS-Version", "Windows 11 Pro")
-	req.Header.Set("X-Device-Brand", "83DG")
-	req.Header.Set("Request-Traffic-Type", "prod")
-	if creds.machineID != "" {
-		req.Header.Set("X-Machine-Id", creds.machineID)
-	}
-	if creds.deviceID != "" {
-		req.Header.Set("X-Device-Id", creds.deviceID)
 	}
 }
 
